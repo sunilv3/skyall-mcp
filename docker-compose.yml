@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  skyfall-ai:
+    build: .
+    container_name: skyfall_ai_v7
+    ports:
+      - "8888:8888"
+    volumes:
+      - .:/app
+    environment:
+      - SKYFALL_AUTH_ENABLED=false
+      - DEBUG_MODE=0
+    restart: unless-stopped
+    networks:
+      - skyfall-net
+
+networks:
+  skyfall-net:
+    driver: bridge

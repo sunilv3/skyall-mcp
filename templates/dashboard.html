@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Skyfall AI | Enterprise Security Suite</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=JetBrains+Mono&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #0a0b10;
+            --card-bg: #161821;
+            --accent-red: #ff3e3e;
+            --accent-cyan: #00f2ff;
+            --accent-magenta: #bc00ff;
+            --text-primary: #ffffff;
+            --text-secondary: #a0a0b8;
+            --border: rgba(255, 255, 255, 0.1);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: var(--bg-dark); color: var(--text-primary); font-family: 'Outfit', sans-serif; display: flex; min-height: 100vh; }
+
+        /* Sidebar */
+        .sidebar { width: 260px; background: var(--card-bg); border-right: 1px solid var(--border); padding: 2rem; display: flex; flex-direction: column; gap: 1rem; position: fixed; height: 100vh; z-index: 100; }
+        .logo { font-size: 1.5rem; font-weight: 700; background: linear-gradient(45deg, var(--accent-red), var(--accent-magenta)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; letter-spacing: 2px; margin-bottom: 2rem; }
+        .nav-item { padding: 1rem; border-radius: 12px; cursor: pointer; transition: all 0.3s; color: var(--text-secondary); font-weight: 500; display: flex; align-items: center; gap: 1rem; }
+        .nav-item:hover, .nav-item.active { background: rgba(255, 62, 62, 0.1); color: var(--accent-red); }
+
+        /* Content Area */
+        .main-content { flex: 1; margin-left: 260px; padding: 2rem; }
+        .section { display: none; }
+        .section.active { display: block; animation: fadeIn 0.4s ease-out; }
+
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; }
+        .status-badge { padding: 0.5rem 1rem; border-radius: 50px; background: rgba(0, 242, 255, 0.1); color: var(--accent-cyan); font-size: 0.8rem; font-weight: 600; border: 1px solid var(--accent-cyan); }
+
+        /* UI Components */
+        .stat-card { background: var(--card-bg); padding: 1.5rem; border-radius: 20px; border: 1px solid var(--border); margin-bottom: 1.5rem; }
+        .dashboard-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.5rem; margin-bottom: 2rem; }
+        .stat-label { color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 0.5rem; }
+        .stat-value { font-size: 1.8rem; font-weight: 700; }
+
+        input, select, button { font-family: inherit; }
+        .btn-primary { background: var(--accent-red); color: #fff; border: none; padding: 1rem 2rem; border-radius: 12px; font-weight: 700; cursor: pointer; transition: 0.3s; }
+        .btn-primary:hover { filter: brightness(1.2); box-shadow: 0 0 20px rgba(255, 62, 62, 0.3); }
+
+        /* Tools Grid */
+        .tools-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 1rem; margin-top: 1.5rem; }
+        .tool-card { background: #1e212d; padding: 1.2rem; border-radius: 15px; border: 1px solid var(--border); }
+        .tool-name { font-weight: 700; color: var(--accent-cyan); margin-bottom: 0.4rem; }
+        .tool-desc { font-size: 0.8rem; color: var(--text-secondary); line-height: 1.4; }
+
+        /* Console */
+        .console { background: #000; border-radius: 20px; padding: 1.5rem; font-family: 'JetBrains Mono', monospace; height: 350px; overflow-y: auto; border: 1px solid var(--border); position: relative; }
+        .log-entry { margin-bottom: 0.4rem; font-size: 0.85rem; }
+        .log-time { color: var(--text-secondary); }
+        .log-type { color: var(--accent-cyan); font-weight: bold; }
+
+        /* Tables */
+        table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+        th { text-align: left; padding: 1rem; color: var(--text-secondary); border-bottom: 1px solid var(--border); }
+        td { padding: 1rem; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
+
+        .live-dot { width: 8px; height: 8px; background: var(--accent-red); border-radius: 50%; display: inline-block; margin-right: 5px; animation: pulse 1s infinite; }
+        @keyframes pulse { 0% { opacity: 0.5; } 50% { opacity: 1; } 100% { opacity: 0.5; } }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <div class="logo">SKYFALL AI</div>
+        <div class="nav-item active" onclick="showSection('dashboard', event)">Dashboard</div>
+        <div class="nav-item" onclick="showSection('agents', event)">AI Agents</div>
+        <div class="nav-item" onclick="showSection('tools', event)">Tool Registry</div>
+        <div class="nav-item" onclick="showSection('history', event)">Scan History</div>
+        <div class="nav-item" onclick="showSection('settings', event)">Settings</div>
+        <div style="margin-top: auto; font-size: 0.7rem; color: var(--text-secondary);">v7.0.0-ENTERPRISE</div>
+    </div>
+
+    <div class="main-content">
+        <!-- Dashboard Section -->
+        <div id="dashboard" class="section active">
+            <header>
+                <h1>Mission Control</h1>
+                <div class="status-badge"><span class="live-dot"></span> SYSTEM_ONLINE</div>
+            </header>
+            
+            <div class="stat-card" style="border-left: 4px solid var(--accent-cyan);">
+                <h3 style="margin-bottom: 1rem;">🚀 Launch Autonomous Mission</h3>
+                <div style="display: flex; gap: 1rem;">
+                    <input type="text" id="target-input" placeholder="Enter Target (IP or Domain)" style="flex: 1; background: #000; border: 1px solid var(--border); padding: 1rem; border-radius: 12px; color: #fff;">
+                    <button class="btn-primary" onclick="startScan()">INITIATE SCAN</button>
+                </div>
+            </div>
+
+            <div class="dashboard-grid">
+                <div class="stat-card"><div class="stat-label">Active Agents</div><div class="stat-value">12</div></div>
+                <div class="stat-card"><div class="stat-label">Total Tools</div><div class="stat-value" id="dash-tools">0</div></div>
+                <div class="stat-card"><div class="stat-label">Vulns Found</div><div class="stat-value" style="color: var(--accent-red);" id="dash-vulns">0</div></div>
+                <div class="stat-card"><div class="stat-label">CPU Load</div><div class="stat-value" id="dash-cpu">0%</div></div>
+            </div>
+
+            <h3 style="margin-bottom: 1rem;">Live Intelligence Feed</h3>
+            <div class="console" id="console">
+                <div class="log-entry"><span class="log-time">[SYSTEM]</span> <span class="log-type">[READY]</span> <span class="log-msg">Skyfall AI Engine active. Waiting for mission deployment...</span></div>
+            </div>
+        </div>
+
+        <!-- Agents Section -->
+        <div id="agents" class="section">
+            <header><h1>Autonomous AI Agents</h1></header>
+            <div class="tools-grid">
+                <div class="stat-card" style="border-top: 4px solid var(--accent-magenta);">
+                    <div class="tool-name">BugBounty-1</div>
+                    <p class="tool-desc">Autonomous vulnerability researcher focused on web applications and API security.</p>
+                    <button class="btn-primary" style="margin-top: 1rem; width: 100%; padding: 0.5rem;">ACTIVATE</button>
+                </div>
+                <div class="stat-card" style="border-top: 4px solid var(--accent-cyan);">
+                    <div class="tool-name">CTF Solver</div>
+                    <p class="tool-desc">Expert in binary exploitation, cryptography, and logic puzzles.</p>
+                    <button class="btn-primary" style="margin-top: 1rem; width: 100%; padding: 0.5rem;">ACTIVATE</button>
+                </div>
+                <div class="stat-card" style="border-top: 4px solid var(--accent-red);">
+                    <div class="tool-name">CVE Hunter</div>
+                    <p class="tool-desc">Monitors real-time CVE feeds and correlates them with discovered target technologies.</p>
+                    <button class="btn-primary" style="margin-top: 1rem; width: 100%; padding: 0.5rem;">ACTIVATE</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tools Section -->
+        <div id="tools" class="section">
+            <header><h1>Tool Registry</h1></header>
+            <input type="text" id="tool-search" placeholder="Search 150+ tools..." onkeyup="filterTools()" style="width: 100%; background: var(--card-bg); border: 1px solid var(--border); padding: 1rem; border-radius: 12px; color: #fff;">
+            <div class="tools-grid" id="tools-list">
+                <!-- Loaded via JS -->
+            </div>
+        </div>
+
+        <!-- History Section -->
+        <div id="history" class="section">
+            <header><h1>Scan History</h1></header>
+            <div class="stat-card">
+                <table>
+                    <thead><tr><th>ID</th><th>Timestamp</th><th>Target</th><th>Agent</th><th>Findings</th><th>Status</th></tr></thead>
+                    <tbody id="history-list">
+                        <!-- Loaded via JS -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Settings Section -->
+        <div id="settings" class="section">
+            <header><h1>Environment Settings</h1></header>
+            <div class="stat-card">
+                <div style="display: grid; gap: 1.5rem;">
+                    <div>
+                        <label class="stat-label">Server Port</label>
+                        <input type="text" id="set-port" value="8888" style="width: 100%; background: #000; border: 1px solid var(--border); padding: 0.8rem; border-radius: 8px; color: #fff;">
+                    </div>
+                    <div>
+                        <label class="stat-label">AI Backend Model</label>
+                        <select id="set-model" style="width: 100%; background: #000; border: 1px solid var(--border); padding: 0.8rem; border-radius: 8px; color: #fff;">
+                            <option value="openai/gpt-4o">GPT-4o (Premium)</option>
+                            <option value="google/gemini-pro-1.5">Gemini 1.5 Pro</option>
+                            <option value="anthropic/claude-3-opus">Claude 3 Opus</option>
+                        </select>
+                    </div>
+                    <button class="btn-primary" onclick="alert('Settings saved successfully (Simulation)')">SAVE CONFIGURATION</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function showSection(id, event) {
+            document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+            document.getElementById(id).classList.add('active');
+            
+            if (event) {
+                event.currentTarget.classList.add('active');
+            }
+            
+            if (id === 'tools') loadTools();
+            if (id === 'history') loadHistory();
+        }
+
+        async function loadTools() {
+            const list = document.getElementById('tools-list');
+            list.innerHTML = '<p>Loading tools...</p>';
+            try {
+                const response = await fetch('/api/tools/list');
+                const data = await response.json();
+                list.innerHTML = '';
+                data.tools.forEach(tool => {
+                    const card = document.createElement('div');
+                    card.className = 'tool-card';
+                    card.innerHTML = `<div class="tool-name">${tool.name}</div><div class="tool-desc">${tool.description}</div>`;
+                    list.appendChild(card);
+                });
+            } catch (e) { list.innerHTML = '<p style="color: red;">Error loading tools.</p>'; }
+        }
+
+        async function loadHistory() {
+            const list = document.getElementById('history-list');
+            list.innerHTML = '<tr><td colspan="6">Loading history...</td></tr>';
+            try {
+                const response = await fetch('/api/history');
+                const data = await response.json();
+                list.innerHTML = '';
+                data.history.forEach(item => {
+                    list.innerHTML += `<tr><td>${item.id}</td><td>${item.timestamp}</td><td>${item.target}</td><td>${item.agent}</td><td>${item.findings_count}</td><td><span style="color: var(--accent-cyan)">${item.status}</span></td></tr>`;
+                });
+                if (data.history.length === 0) list.innerHTML = '<tr><td colspan="6">No scan history found.</td></tr>';
+            } catch (e) { list.innerHTML = '<tr><td colspan="6" style="color: red;">Error loading history.</td></tr>'; }
+        }
+
+        function filterTools() {
+            const query = document.getElementById('tool-search').value.toLowerCase();
+            document.querySelectorAll('.tool-card').forEach(card => {
+                const name = card.querySelector('.tool-name').innerText.toLowerCase();
+                card.style.display = name.includes(query) ? 'block' : 'none';
+            });
+        }
+
+        async function startScan() {
+            const target = document.getElementById('target-input').value;
+            if (!target) return alert("Enter a target!");
+            addLog('AGENT', `Deploying BugBounty-1 to ${target}...`);
+            
+            try {
+                const response = await fetch('/api/intelligence/analyze-target', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ target })
+                });
+                const data = await response.json();
+                addLog('INTEL', `Strategy: ${data.recommended_strategy}`);
+                data.suggested_tools.forEach((t, i) => setTimeout(() => addLog('EXEC', `Running ${t}...`), (i+1)*2000));
+            } catch (e) { addLog('ERROR', 'Scan failed.'); }
+        }
+
+        function addLog(type, msg) {
+            const console = document.getElementById('console');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            const time = new Date().toLocaleTimeString();
+            entry.innerHTML = `<span class="log-time">[${time}]</span> <span class="log-type">[${type}]</span> <span class="log-msg">${msg}</span>`;
+            console.appendChild(entry);
+            console.scrollTop = console.scrollHeight;
+        }
+
+        async function updateStats() {
+            try {
+                const response = await fetch('/health');
+                const data = await response.json();
+                document.getElementById('dash-tools').innerText = data.tools.total;
+                document.getElementById('dash-cpu').innerText = data.system.cpu_percent + '%';
+            } catch (e) {}
+        }
+
+        setInterval(updateStats, 5000);
+        updateStats();
+    </script>
+</body>
+</html>

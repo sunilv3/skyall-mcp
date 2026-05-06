@@ -1,3 +1,38 @@
+# Core Framework
 Flask>=3.0.0
 requests>=2.31.0
+python-dotenv>=1.0.0
+
+# MCP Protocol Support
 mcp>=1.0.0
+
+# System & Process Management
+psutil>=5.9.0
+watchdog>=3.0.0
+
+# Browser Automation & Testing
+selenium>=4.10.0
+webdriver-manager>=3.8.5
+playwright>=1.40.0
+
+# API & HTTP Tools
+httpx>=0.24.0
+urllib3>=2.0.0
+
+# Authentication & Security
+cryptography>=41.0.0
+PyJWT>=2.8.0
+
+# Data Processing
+numpy>=1.24.0
+pandas>=2.0.0
+
+# Caching
+redis>=5.0.0
+
+# Logging & Monitoring
+python-json-logger>=2.0.0
+
+# Testing (Optional - see requirements-dev.txt)
+# pytest>=7.4.0
+# pytest-cov>=4.1.0

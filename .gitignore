@@ -1,0 +1,26 @@
+# Skyfall AI - Git Ignore
+
+# Sensitive Environment Variables
+.env
+.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv
+venv/
+ENV/
+
+# Data & History
+data/
+reports/
+logs/
+
+# IDEs
+.vscode/
+.idea/
+
+# OS Files
+.DS_Store
+Thumbs.db

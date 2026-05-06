@@ -1,195 +1,67 @@
-# Skyall MCP - Kali Server
+<div align="center">
 
-**Skyall MCP Kali Server** is a lightweight API bridge that connects MCP clients (e.g: Claude Desktop or 5ire) to an API server that allows executing commands on a Linux terminal.
+# 🌌 Skyfall AI Agents v7.0
+### Advanced AI-Powered Cybersecurity Automation Platform
 
-This MCP can run terminal commands and interact with web applications using:
+[![Python](https://img.shields.io/badge/Python-3.8%2B-blue.svg)](https://www.python.org/)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Security](https://img.shields.io/badge/Security-Penetration%20Testing-red.svg)](https://github.com/sunilv3/skyfall)
+[![MCP](https://img.shields.io/badge/MCP-Compatible-purple.svg)](https://github.com/sunilv3/skyfall)
+[![Version](https://img.shields.io/badge/Version-7.0.0-orange.svg)](https://github.com/sunilv3/skyfall/releases)
+[![Tools](https://img.shields.io/badge/Security%20Tools-150%2B-brightgreen.svg)](https://github.com/sunilv3/skyfall)
+[![Agents](https://img.shields.io/badge/AI%20Agents-12%2B-purple.svg)](https://github.com/sunilv3/skyfall)
 
-- Dirb
-- enum4linux
-- gobuster
-- Hydra
-- John the Ripper
-- Metasploit-Framework
-- Nikto
-- Nmap
-- sqlmap
-- WPScan
-- wafw00f — WAF detection  
-- dalfox / XSStrike — XSS scanning  
-- subfinder / amass — Subdomain enumeration  
-- nuclei — Vulnerability scanning  
-- ffuf — Web fuzzing  
-- commix — Command injection  
-- ghauri — Advanced SQL injection  
-- corsy — CORS misconfiguration scanner  
-- crlfuzz — CRLF injection scanner  
-- smuggler — HTTP request smuggling detection  
-- katana — Web crawler  
-- gau — URL fetching from archives  
-- arjun — Parameter discovery  
-- paramspider — Parameter extraction  
-- And raw command execution  
+**The ultimate autonomous command center for modern penetration testing.**
+</div>
 
 ---
 
-## 👨‍💻 Created By
+## 🚀 Overview
+Skyfall AI v7.0 is a next-generation cybersecurity framework that combines **Autonomous AI Agents** with a massive library of **150+ security tools**. Built on a modular architecture, it allows security researchers to launch complex, multi-stage missions from a premium web-based command center.
 
-**Skyall (sunilv3)**  
-https://github.com/sunilv3  
+## 🌟 Core Features
+- **🧠 Autonomous Decision Engine**: Real-time target analysis and intelligent tool selection powered by GPT-4o, Gemini Pro, and Claude 3.
+- **🖥️ Master Control Dashboard**: A stunning, real-time web interface for managing missions, viewing intelligence feeds, and analyzing findings.
+- **🕵️ Specialized Agents**:
+  - **BugBounty-1**: Focuses on web application security and API exploitation.
+  - **CTF Solver**: Expert in binary analysis, cryptography, and complex logic puzzles.
+  - **CVE Hunter**: Automatically correlates tech stacks with the latest global vulnerabilities.
+- **🛠️ 150+ Tools Registry**: Pre-integrated with the **Kali Linux Headless** suite for immediate action.
+- **📊 Vulnerability Intelligence**: Deep-dive CVE tracking and exploit path discovery.
+- **🐳 Dockerized Deployment**: Run the full Kali environment in a single command, isolated and secure.
 
----
+## 🛠️ Technology Stack
+- **Backend**: Python 3.11, Flask, MCP (Model Context Protocol).
+- **Frontend**: Premium Vanilla CSS, HTML5, JavaScript (Real-time Polling).
+- **AI Backend**: OpenRouter, Google AI (Gemini), NVIDIA NIM.
+- **OS Environment**: Kali Linux (Dockerized).
 
-## 🔍 Use Case
+## 🚦 Quick Start
 
-- Connect MCP with AI models (OpenAI, Claude, DeepSeek, Ollama, etc.)
-- Execute commands on Kali Linux via API
-- Automate:
-  - CTF solving  
-  - Recon  
-  - Exploitation  
-- Send custom commands like curl, nmap, ffuf, etc.
-
----
-
-## 🚀 Features
-
-- 🧠 AI Integration  
-- 🖥️ Command Execution API  
-- 🕸️ Web Interaction Support  
-- 🔐 Offensive Security Focus  
-- 🛡️ 40+ Security Tools Included  
-
----
-
-## 🛠️ Installation
-
-### 🐧 Linux / Kali
-
+### 1. Configure
+Create a `.env` file from the example and add your AI keys:
 ```bash
-git clone https://github.com/sunilv3/skyall-mcp.git
-cd skyall-mcp
-
-python3 -m venv .venv
-source .venv/bin/activate
-
-pip install -r requirements.txt
-
-python3 server.py
+OPENROUTER_API_KEY=your_key_here
+NVIDIA_API_KEY=your_key_here
 ```
 
----
-
-### 🪟 Windows
-
-```powershell
-git clone https://github.com/sunilv3/skyall-mcp.git
-cd skyall-mcp
-
-python -m venv .venv
-.venv\Scripts\activate
-
-pip install -r requirements.txt
-
-python server.py
-```
-
----
-
-### 🍎 macOS
-
+### 2. Deploy with Docker (Recommended)
 ```bash
-git clone https://github.com/sunilv3/skyall-mcp.git
-cd skyall-mcp
-
-python3 -m venv .venv
-source .venv/bin/activate
-
-pip3 install -r requirements.txt
-
-python3 server.py
+docker-compose up --build -d
 ```
 
----
-
-## 🔌 MCP Client Setup
-
-### Local Connection (Same Machine)
-
+### 3. Launch Local Dashboard
+If not using Docker, run:
 ```bash
-python3 client.py --server http://127.0.0.1:5000
+python skyfall_server.py
 ```
+Access the dashboard at: **http://localhost:8888/dashboard**
+
+## 📖 Documentation
+Detailed setup guides and tool usage can be found in the [walkthrough.md](walkthrough.md) file.
 
 ---
-
-### Remote Connection (Recommended via SSH)
-
-```bash
-# Terminal 1
-ssh -L 5000:localhost:5000 user@LINUX_IP
-
-# Terminal 2
-python3 client.py --server http://127.0.0.1:5000
-```
-
----
-
-## ⚙️ Claude Desktop Configuration
-
-### Config File Locations
-
-- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
-- Linux: `~/.config/Claude/claude_desktop_config.json`
-
----
-
-### 🪟 Windows Example
-
-```json
-{
-  "mcpServers": {
-    "skyall-kali-server": {
-      "command": "python",
-      "args": ["C:\\Users\\YOUR_USERNAME\\skyall-mcp\\client.py", "--server", "http://127.0.0.1:5000"]
-    }
-  }
-}
-```
-
----
-
-### 🍎 macOS / 🐧 Linux Example
-
-```json
-{
-  "mcpServers": {
-    "skyall-kali-server": {
-      "command": "python3",
-      "args": ["/home/YOUR_USERNAME/skyall-mcp/client.py", "--server", "http://127.0.0.1:5000"]
-    }
-  }
-}
-```
-
----
-
-## 🧩 5ire Desktop Configuration
-
-Simply add an MCP using:
-
-```bash
-python3 /absolute/path/to/client.py --server http://LINUX_IP:5000
-```
-
-5ire will automatically generate the required configuration files.
-
----
-
-## ⚠️ Disclaimer
-
-This project is intended **only for educational and ethical security testing purposes**.
-
-Unauthorized use, exploitation, or malicious activity is strictly prohibited.  
-The author assumes no responsibility for misuse.
-
----
+<div align="center">
+<b>Stay Safe. Stay Anonymous. Skyfall AI.</b>
+<p>Developed with ❤️ for the Cybersecurity Community</p>
+</div>
