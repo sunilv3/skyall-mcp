@@ -25,8 +25,8 @@ WORKDIR /app
 COPY . .
 
 # Install Python dependencies
-RUN pip3 install --no-cache-dir -r requirements.txt || \
-    pip3 install --no-cache-dir flask requests python-dotenv psutil pandas dnspython openpyxl
+RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt || \
+    pip3 install --no-cache-dir --break-system-packages flask requests python-dotenv psutil pandas dnspython openpyxl
 
 # Expose the dashboard port
 EXPOSE 8888
