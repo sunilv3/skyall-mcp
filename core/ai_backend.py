@@ -81,12 +81,10 @@ class AIBackend:
             fallbacks = [
                 "openrouter/free",
                 "meta-llama/llama-3.3-70b-instruct:free",
+                "google/gemma-2-9b-it:free",
+                "mistralai/mistral-7b-instruct:free",
                 "nousresearch/hermes-3-llama-3.1-405b:free",
-                "google/gemma-4-26b-a4b-it:free",
-                "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
-                "openai/gpt-oss-120b:free",
-                "google/gemini-flash-1.5:free",
-                "google/gemini-2.0-flash-exp:free"
+                "google/gemini-flash-1.5:free"
             ]
             for f in fallbacks:
                 if f not in models_to_try:
