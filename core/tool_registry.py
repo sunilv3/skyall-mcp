@@ -7,6 +7,7 @@ Manages 150+ security tools without hitting MCP client registration limits
 import logging
 import shlex
 import subprocess
+import os
 from typing import Dict, List, Any, Optional, Callable
 from dataclasses import dataclass, asdict
 
@@ -22,6 +23,7 @@ class ToolParameter:
     description: str = ""
     default: Any = None
     choices: List[str] = None
+    flag: Optional[str] = None  # e.g., "-u", "--target", "-p"
 
 
 @dataclass
@@ -67,402 +69,234 @@ class ToolRegistry:
         logger.info(f"Initialized tool registry with {len(self.tools)} tools")
     
     def _register_tools(self):
-        """Register all available security tools"""
+        """Register all available security tools with full parameter mapping"""
         
-        # Network Reconnaissance & Scanning
+        # ── NETWORK RECONNAISSANCE ───────────────────────────────────────────
         self.register_tool(Tool(
             name="nmap",
             category="network",
             description="Advanced port scanning with custom NSE scripts",
             command="nmap",
             parameters=[
-                ToolParameter("target", "string", required=True, description="Target host or IP"),
-                ToolParameter("scan_type", "string", description="Scan type (e.g., -sCV)", default="-sCV"),
-                ToolParameter("ports", "string", description="Ports to scan"),
-                ToolParameter("additional_args", "string", description="Additional nmap arguments")
-            ],
-            examples=["nmap -sCV -T4 example.com", "nmap -p 80,443 example.com"]
-        ))
-        
-        self.register_tool(Tool(
-            name="rustscan",
-            category="network",
-            description="Ultra-fast port scanner with intelligent rate limiting",
-            command="rustscan",
-            parameters=[
-                ToolParameter("target", "string", required=True, description="Target host or IP"),
-                ToolParameter("ports", "string", description="Port range"),
-                ToolParameter("additional_args", "string", description="Additional arguments")
+                ToolParameter("target", "string", required=True, flag=""),
+                ToolParameter("scan_type", "string", default="-sCV", flag=""),
+                ToolParameter("ports", "string", flag="-p"),
+                ToolParameter("additional_args", "string", flag="")
             ]
         ))
-        
+
         self.register_tool(Tool(
-            name="masscan",
+            name="nmap_advanced",
             category="network",
-            description="High-speed Internet-scale port scanning",
-            command="masscan",
+            description="Advanced Nmap with NSE script presets",
+            command="nmap",
             parameters=[
-                ToolParameter("target", "string", required=True, description="Target CIDR range"),
-                ToolParameter("ports", "string", description="Ports to scan", default="0-65535"),
-                ToolParameter("rate", "integer", description="Packet rate", default=100000)
+                ToolParameter("target", "string", required=True, flag=""),
+                ToolParameter("preset", "string", default="vuln", flag="--script"),
+                ToolParameter("ports", "string", flag="-p"),
+                ToolParameter("os_detect", "boolean", default=True, flag="-O"),
+                ToolParameter("traceroute", "boolean", default=False, flag="--traceroute"),
+                ToolParameter("output", "string", flag="-oX"),
+                ToolParameter("additional_args", "string", flag="")
             ]
         ))
-        
-        self.register_tool(Tool(
-            name="amass",
-            category="network",
-            description="Advanced subdomain enumeration and OSINT",
-            command="amass",
-            parameters=[
-                ToolParameter("domain", "string", required=True, description="Target domain"),
-                ToolParameter("mode", "string", description="Mode (enum/intel/track)", default="enum"),
-                ToolParameter("passive", "boolean", description="Use passive sources", default=True)
-            ]
-        ))
-        
+
         self.register_tool(Tool(
             name="subfinder",
             category="network",
             description="Fast passive subdomain discovery",
             command="subfinder",
             parameters=[
-                ToolParameter("domain", "string", required=True, description="Target domain"),
-                ToolParameter("silent", "boolean", description="Silent output", default=True)
+                ToolParameter("domain", "string", required=True, flag="-d"),
+                ToolParameter("silent", "boolean", default=True, flag="-silent"),
+                ToolParameter("additional_args", "string", flag="")
             ]
         ))
-        
-        # Web Application Security
+
         self.register_tool(Tool(
-            name="gobuster",
-            category="web",
-            description="Directory, file, and DNS enumeration",
-            command="gobuster",
+            name="amass",
+            category="network",
+            description="In-depth attack surface mapping",
+            command="amass",
             parameters=[
-                ToolParameter("url", "string", required=True, description="Target URL"),
-                ToolParameter("mode", "string", description="Mode (dir/dns/fuzz)", default="dir"),
-                ToolParameter("wordlist", "string", description="Wordlist path"),
-                ToolParameter("additional_args", "string", description="Additional arguments")
+                ToolParameter("mode", "string", default="enum", flag=""),
+                ToolParameter("domain", "string", required=True, flag="-d"),
+                ToolParameter("additional_args", "string", flag="-passive")
             ]
         ))
-        
+
+        # ── WEB APPLICATION SECURITY ─────────────────────────────────────────
         self.register_tool(Tool(
             name="nuclei",
             category="web",
-            description="Template-based vulnerability scanner with 4000+ templates",
+            description="Template-based vulnerability scanner",
             command="nuclei",
             parameters=[
-                ToolParameter("target", "string", required=True, description="Target URL"),
-                ToolParameter("templates", "string", description="Template directory"),
-                ToolParameter("severity", "string", description="Severity level"),
-                ToolParameter("additional_args", "string", description="Additional arguments")
+                ToolParameter("target", "string", required=True, flag="-u"),
+                ToolParameter("templates", "string", flag="-t"),
+                ToolParameter("severity", "string", flag="-severity"),
+                ToolParameter("additional_args", "string", flag="")
             ]
         ))
-        
+
         self.register_tool(Tool(
             name="sqlmap",
             category="web",
-            description="Automatic SQL injection testing with tamper scripts",
+            description="Automatic SQL injection testing",
             command="sqlmap",
             parameters=[
-                ToolParameter("url", "string", required=True, description="Target URL"),
-                ToolParameter("data", "string", description="POST data"),
-                ToolParameter("level", "integer", description="Test level (1-5)", default=3),
-                ToolParameter("technique", "string", description="Technique (B/E/U/S/T/Q)")
+                ToolParameter("url", "string", required=True, flag="-u"),
+                ToolParameter("data", "string", flag="--data"),
+                ToolParameter("level", "integer", default=3, flag="--level"),
+                ToolParameter("risk", "integer", default=2, flag="--risk"),
+                ToolParameter("additional_args", "string", flag="")
             ]
         ))
-        
+
         self.register_tool(Tool(
-            name="ffuf",
+            name="sqlmap_advanced",
             category="web",
-            description="Fast web fuzzer with advanced filtering",
-            command="ffuf",
+            description="Red-team grade SQLmap with full feature control",
+            command="sqlmap",
             parameters=[
-                ToolParameter("url", "string", required=True, description="URL with FUZZ placeholder"),
-                ToolParameter("wordlist", "string", description="Wordlist path"),
-                ToolParameter("filter_code", "string", description="Filter response codes")
+                ToolParameter("url", "string", required=True, flag="-u"),
+                ToolParameter("data", "string", flag="--data"),
+                ToolParameter("cookie", "string", flag="--cookie"),
+                ToolParameter("level", "integer", default=3, flag="--level"),
+                ToolParameter("risk", "integer", default=2, flag="--risk"),
+                ToolParameter("technique", "string", default="BEUSTQ", flag="--technique"),
+                ToolParameter("tamper", "string", flag="--tamper"),
+                ToolParameter("dbms", "string", flag="--dbms"),
+                ToolParameter("dump", "boolean", flag="--dump"),
+                ToolParameter("dbs", "boolean", flag="--dbs"),
+                ToolParameter("os_shell", "boolean", flag="--os-shell"),
+                ToolParameter("threads", "integer", default=5, flag="--threads"),
+                ToolParameter("additional_args", "string", flag="")
             ]
         ))
-        
+
         self.register_tool(Tool(
-            name="feroxbuster",
+            name="dalfox",
             category="web",
-            description="Recursive content discovery with intelligent filtering",
-            command="feroxbuster",
+            description="Fast XSS scanning and parameter analysis",
+            command="dalfox",
             parameters=[
-                ToolParameter("url", "string", required=True, description="Target URL"),
-                ToolParameter("wordlist", "string", description="Wordlist path"),
-                ToolParameter("additional_args", "string", description="Additional arguments")
-            ]
-        ))
-        
-        # Authentication & Password
-        self.register_tool(Tool(
-            name="hydra",
-            category="auth",
-            description="Network login cracker for 50+ protocols",
-            command="hydra",
-            parameters=[
-                ToolParameter("target", "string", required=True, description="Target host"),
-                ToolParameter("service", "string", required=True, description="Service (ssh/ftp/http)"),
-                ToolParameter("username", "string", description="Username"),
-                ToolParameter("password", "string", description="Password to try")
-            ]
-        ))
-        
-        self.register_tool(Tool(
-            name="john",
-            category="auth",
-            description="Advanced password hash cracking",
-            command="john",
-            parameters=[
-                ToolParameter("hash_file", "string", required=True, description="Hash file path"),
-                ToolParameter("wordlist", "string", description="Wordlist path"),
-                ToolParameter("format", "string", description="Hash format")
-            ]
-        ))
-        
-        self.register_tool(Tool(
-            name="hashcat",
-            category="auth",
-            description="GPU-accelerated password recovery",
-            command="hashcat",
-            parameters=[
-                ToolParameter("hash_file", "string", required=True, description="Hash file"),
-                ToolParameter("attack_mode", "integer", description="Attack mode (0-9)"),
-                ToolParameter("wordlist", "string", description="Wordlist path")
-            ]
-        ))
-        
-        # Binary Analysis & Reverse Engineering
-        self.register_tool(Tool(
-            name="ghidra",
-            category="binary",
-            description="NSA software reverse engineering suite",
-            command="ghidra",
-            parameters=[
-                ToolParameter("binary", "string", required=True, description="Binary file path"),
-                ToolParameter("script", "string", description="Ghidra script path")
-            ]
-        ))
-        
-        self.register_tool(Tool(
-            name="radare2",
-            category="binary",
-            description="Advanced reverse engineering framework",
-            command="r2",
-            parameters=[
-                ToolParameter("binary", "string", required=True, description="Binary file path"),
-                ToolParameter("command", "string", description="Radare2 command")
-            ]
-        ))
-        
-        self.register_tool(Tool(
-            name="gdb",
-            category="binary",
-            description="GNU Debugger with exploit development support",
-            command="gdb",
-            parameters=[
-                ToolParameter("binary", "string", required=True, description="Binary file path"),
-                ToolParameter("script", "string", description="GDB script path")
-            ]
-        ))
-        
-        self.register_tool(Tool(
-            name="binwalk",
-            category="binary",
-            description="Firmware analysis and binary extraction",
-            command="binwalk",
-            parameters=[
-                ToolParameter("file", "string", required=True, description="File to analyze"),
-                ToolParameter("extract", "boolean", description="Extract files", default=False)
-            ]
-        ))
-        
-        # Cloud & Container Security
-        self.register_tool(Tool(
-            name="prowler",
-            category="cloud",
-            description="AWS/Azure/GCP security assessment",
-            command="prowler",
-            parameters=[
-                ToolParameter("provider", "string", description="Cloud provider (aws/azure/gcp)"),
-                ToolParameter("check", "string", description="Specific check to run")
-            ]
-        ))
-        
-        self.register_tool(Tool(
-            name="trivy",
-            category="cloud",
-            description="Container and IaC vulnerability scanner",
-            command="trivy",
-            parameters=[
-                ToolParameter("target", "string", required=True, description="Container/image to scan"),
-                ToolParameter("severity", "string", description="Severity level")
-            ]
-        ))
-        
-        self.register_tool(Tool(
-            name="kube-hunter",
-            category="cloud",
-            description="Kubernetes penetration testing",
-            command="kube-hunter",
-            parameters=[
-                ToolParameter("pod", "boolean", description="Run as pod", default=False)
-            ]
-        ))
-        
-        # CTF & Forensics
-        self.register_tool(Tool(
-            name="volatility",
-            category="ctf",
-            description="Advanced memory forensics framework",
-            command="volatility",
-            parameters=[
-                ToolParameter("dump_file", "string", required=True, description="Memory dump path"),
-                ToolParameter("profile", "string", required=True, description="OS profile"),
-                ToolParameter("plugin", "string", description="Plugin to run")
-            ]
-        ))
-        
-        self.register_tool(Tool(
-            name="foremost",
-            category="ctf",
-            description="File carving and data recovery",
-            command="foremost",
-            parameters=[
-                ToolParameter("file", "string", required=True, description="File to carve"),
-                ToolParameter("output_dir", "string", description="Output directory")
-            ]
-        ))
-        
-        self.register_tool(Tool(
-            name="steghide",
-            category="ctf",
-            description="Steganography detection and extraction",
-            command="steghide",
-            parameters=[
-                ToolParameter("file", "string", required=True, description="Stego file"),
-                ToolParameter("password", "string", description="Passphrase")
-            ]
-        ))
-        
-        # OSINT Tools
-        self.register_tool(Tool(
-            name="theHarvester",
-            category="osint",
-            description="Email and subdomain harvesting from multiple sources",
-            command="theHarvester",
-            parameters=[
-                ToolParameter("domain", "string", required=True, description="Target domain"),
-                ToolParameter("sources", "string", description="Sources to search")
-            ]
-        ))
-        
-        self.register_tool(Tool(
-            name="shodan",
-            category="osint",
-            description="Internet-connected device search",
-            command="shodan",
-            parameters=[
-                ToolParameter("query", "string", required=True, description="Search query"),
-                ToolParameter("limit", "integer", description="Result limit", default=10)
+                ToolParameter("mode", "string", default="url", flag=""),
+                ToolParameter("url", "string", required=True, flag=""),
+                ToolParameter("additional_args", "string", flag="")
             ]
         ))
 
-        # Additional Network Tools
-        network_tools = [
-            ("fierce", "DNS reconnaissance and zone transfer testing"),
-            ("dnsenum", "DNS information gathering and subdomain brute forcing"),
-            ("autorecon", "Comprehensive automated reconnaissance"),
-            ("responder", "LLMNR, NBT-NS and MDNS poisoner"),
-            ("netexec", "Network service exploitation framework"),
-            ("enum4linux-ng", "Advanced SMB enumeration"),
-            ("smbmap", "SMB share enumeration and exploitation"),
-            ("arp-scan", "Network discovery using ARP requests"),
-            ("nbtscan", "NetBIOS name scanning and enumeration"),
-            ("rpcclient", "RPC enumeration and null session testing")
+        self.register_tool(Tool(
+            name="wafw00f",
+            category="web",
+            description="Web Application Firewall fingerprinting",
+            command="wafw00f",
+            parameters=[
+                ToolParameter("url", "string", required=True, flag=""),
+                ToolParameter("additional_args", "string", flag="-a")
+            ]
+        ))
+
+        # ── PARAMETER & ENDPOINT DISCOVERY ───────────────────────────────────
+        self.register_tool(Tool(
+            name="katana",
+            category="web",
+            description="Next-generation web crawling and spidering",
+            command="katana",
+            parameters=[
+                ToolParameter("url", "string", required=True, flag="-u"),
+                ToolParameter("depth", "integer", default=3, flag="-d"),
+                ToolParameter("js_crawl", "boolean", default=True, flag="-jc"),
+                ToolParameter("headless", "boolean", default=False, flag="-hl"),
+                ToolParameter("output", "string", flag="-o")
+            ]
+        ))
+
+        self.register_tool(Tool(
+            name="arjun",
+            category="web",
+            description="HTTP parameter discovery suite",
+            command="arjun",
+            parameters=[
+                ToolParameter("url", "string", required=True, flag="-u"),
+                ToolParameter("method", "string", default="GET", flag="-m"),
+                ToolParameter("threads", "integer", default=5, flag="-t")
+            ]
+        ))
+
+        # ── CUSTOM INTEGRATED TOOLS ──────────────────────────────────────────
+        import sys
+        python_exe = sys.executable
+        
+        self.register_tool(Tool(
+            name="subdomain_validator",
+            category="network",
+            description="Skyfall Custom Subdomain Validator (DNS/SSL/HTTP)",
+            command=f"{python_exe} tools/subdomainchecker.py",
+            parameters=[
+                ToolParameter("domains", "string", required=True, flag="-d"),
+                ToolParameter("threads", "integer", default=10, flag="-t"),
+                ToolParameter("output", "string", flag="-o")
+            ]
+        ))
+
+        self.register_tool(Tool(
+            name="status_checker",
+            category="web",
+            description="Skyfall Custom Domain Status Checker (Bulk)",
+            command=f"{python_exe} tools/statueschecker.py",
+            parameters=[
+                ToolParameter("domains", "string", required=True, flag="--domains"),
+                ToolParameter("output", "string", flag="--output")
+            ]
+        ))
+
+        # ── BULK REGISTRATION FOR ADDITIONAL TOOLS ──────────────────────────
+        # Register the rest of the tools from skyfall_mcp.py with basic mapping
+        additional_tools = [
+            ("gobuster", "web", "Directory, file, and DNS enumeration"),
+            ("nikto", "web", "Web server vulnerability scanner"),
+            ("hydra", "auth", "Network login cracker"),
+            ("john", "auth", "Password hash cracking"),
+            ("wpscan", "web", "WordPress security scanner"),
+            ("enum4linux", "network", "Windows/Samba enumeration"),
+            ("xsstrike", "web", "Advanced XSS detection"),
+            ("httpx", "web", "HTTP probing and tech detection"),
+            ("ffuf", "web", "Fast web fuzzer"),
+            ("whatweb", "web", "Web technology identification"),
+            ("theHarvester", "osint", "OSINT gathering"),
+            ("dnsx", "network", "DNS resolution and enumeration"),
+            ("sslscan", "web", "SSL/TLS configuration scanner"),
+            ("shodan", "osint", "Shodan CLI lookup"),
+            ("paramspider", "web", "Injectable parameter mining"),
+            ("gau", "web", "Historical URL fetching"),
+            ("commix", "web", "OS command injection testing"),
+            ("ghauri", "web", "Advanced SQL injection"),
+            ("corsy", "web", "CORS misconfig scanner"),
+            ("crlfuzz", "web", "CRLF injection scanner"),
+            ("smuggler", "web", "HTTP Request Smuggling detection"),
+            ("gitdumper", "web", "Exposed .git directory dumper"),
+            ("linkfinder", "web", "JS endpoint extractor"),
+            ("rustscan", "network", "Ultra-fast port scanner"),
+            ("masscan", "network", "High-speed port scanning"),
+            ("feroxbuster", "web", "Recursive content discovery")
         ]
-        for name, desc in network_tools:
-            self.register_tool(Tool(name=name, category="network", description=desc, command=name, parameters=[ToolParameter("target", "string", required=True)]))
 
-        # Additional Web Tools
-        web_tools = [
-            ("dirsearch", "Advanced directory and file discovery"),
-            ("httpx", "Fast HTTP probing and technology detection"),
-            ("hakrawler", "Fast web endpoint discovery and crawling"),
-            ("gau", "Get All URLs from multiple sources"),
-            ("waybackurls", "Historical URL discovery from Wayback Machine"),
-            ("nikto", "Web server vulnerability scanner"),
-            ("wpscan", "WordPress security scanner"),
-            ("arjun", "HTTP parameter discovery"),
-            ("paramspider", "Parameter mining from web archives"),
-            ("x8", "Hidden parameter discovery"),
-            ("jaeles", "Advanced vulnerability scanning"),
-            ("dalfox", "Advanced XSS vulnerability scanning"),
-            ("wafw00f", "Web application firewall fingerprinting"),
-            ("testssl", "SSL/TLS configuration testing"),
-            ("sslscan", "SSL/TLS cipher suite enumeration"),
-            ("sslyze", "Fast SSL/TLS configuration analyzer"),
-            ("whatweb", "Web technology identification"),
-            ("jwt-tool", "JSON Web Token testing"),
-            ("commix", "Command injection exploitation tool"),
-            ("nosqlmap", "NoSQL injection testing"),
-            ("tplmap", "Server-side template injection exploitation")
-        ]
-        for name, desc in web_tools:
-            self.register_tool(Tool(name=name, category="web", description=desc, command=name, parameters=[ToolParameter("url", "string", required=True)]))
+        for name, cat, desc in additional_tools:
+            if name not in self.tools:
+                # Default to 'url' or 'target' based on category
+                main_param = "url" if cat == "web" else "target"
+                self.register_tool(Tool(
+                    name=name, 
+                    category=cat, 
+                    description=desc, 
+                    command=name, 
+                    parameters=[ToolParameter(main_param, "string", required=True, flag="")]
+                ))
 
-        # Additional Cloud Tools
-        cloud_tools = [
-            ("scout-suite", "Multi-cloud security auditing"),
-            ("cloudmapper", "AWS network visualization"),
-            ("pacu", "AWS exploitation framework"),
-            ("clair", "Container vulnerability analysis"),
-            ("kube-bench", "CIS Kubernetes benchmark checker"),
-            ("docker-bench-security", "Docker security assessment"),
-            ("falco", "Runtime security monitoring"),
-            ("checkov", "Infrastructure as code security scanning"),
-            ("terrascan", "Infrastructure security scanner"),
-            ("cloudsploit", "Cloud security scanning")
-        ]
-        for name, desc in cloud_tools:
-            self.register_tool(Tool(name=name, category="cloud", description=desc, command=name, parameters=[ToolParameter("target", "string", required=True)]))
+        logger.info(f"Registered {len(self.tools)} tools with enhanced parameter mapping")
 
-        # Additional Binary Tools
-        binary_tools = [
-            ("gdb-peda", "Python Exploit Development Assistance for GDB"),
-            ("gdb-gef", "GDB Enhanced Features"),
-            ("ropgadget", "ROP/JOP gadget finder"),
-            ("ropper", "ROP gadget finder"),
-            ("one-gadget", "Find one-shot RCE gadgets"),
-            ("checksec", "Binary security property checker"),
-            ("readelf", "ELF file analyzer"),
-            ("xxd", "Hex dump utility"),
-            ("pwntools", "CTF framework and exploit development"),
-            ("angr", "Binary analysis platform"),
-            ("upx", "Executable packer/unpacker")
-        ]
-        for name, desc in binary_tools:
-            self.register_tool(Tool(name=name, category="binary", description=desc, command=name, parameters=[ToolParameter("binary", "string", required=True)]))
-
-        # Additional CTF & Forensics
-        ctf_tools = [
-            ("volatility3", "Next-generation memory forensics"),
-            ("photorec", "File recovery software"),
-            ("testdisk", "Disk partition recovery"),
-            ("stegsolve", "Steganography analysis tool"),
-            ("zsteg", "PNG/BMP steganography detection"),
-            ("outguess", "Universal steganographic tool"),
-            ("exiftool", "Metadata reader/writer"),
-            ("scalpel", "File carving tool"),
-            ("bulk_extractor", "Feature extraction tool"),
-            ("autopsy", "Digital forensics platform")
-        ]
-        for name, desc in ctf_tools:
-            self.register_tool(Tool(name=name, category="ctf", description=desc, command=name, parameters=[ToolParameter("file", "string", required=True)]))
-
-        logger.info(f"Registered {len(self.tools)} tools")
-    
     def register_tool(self, tool: Tool):
         """Register a tool"""
         self.tools[tool.name] = tool
@@ -496,10 +330,13 @@ class ToolRegistry:
     def is_available(self, tool_name: str) -> bool:
         """Check if tool is available on system"""
         try:
+            # Use 'where' on Windows, 'which' on Unix
+            cmd = "where" if os.name == "nt" else "which"
             result = subprocess.run(
-                ["which", tool_name],
+                [cmd, tool_name],
                 capture_output=True,
-                timeout=5
+                timeout=5,
+                shell=(os.name == "nt")
             )
             return result.returncode == 0
         except Exception:

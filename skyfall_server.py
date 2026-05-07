@@ -134,7 +134,8 @@ class CommandExecutor:
     def __init__(self, command, timeout: int = COMMAND_TIMEOUT):
         self.command = command
         self.timeout = timeout
-        self.use_shell = isinstance(command, str)
+        # Use shell on Windows if command is a list to ensure path resolution
+        self.use_shell = isinstance(command, str) or (os.name == "nt")
         self.process = None
         self.stdout_data = ""
         self.stderr_data = ""
@@ -289,38 +290,86 @@ def execute_tool():
         data = request.json or {}
         tool_name = data.get("tool_name", "")
         parameters = data.get("parameters", {})
-        use_cache = data.get("use_cache", True)
-        
-        if not tool_name:
-            return jsonify({"error": "tool_name is required"}), 400
-        
-        tool = tool_registry.get_tool(tool_name)
-        if not tool:
-            return jsonify({"error": f"Tool '{tool_name}' not found"}), 404
-        
-        # Check cache
-        cache_key = f"tool:{tool_name}"
-        if use_cache:
-            cached_result = cache_manager.get(cache_key, parameters)
-            if cached_result:
-                return jsonify({"result": cached_result, "cached": True})
-        
-        # Build command
-        command = [tool.command] + [str(v) for v in parameters.values()]
-        
-        # Execute
-        executor = CommandExecutor(command)
-        result = executor.execute()
-        
-        # Cache result
-        if result.get("success") and use_cache:
-            cache_manager.set(cache_key, result, parameters)
-        
-        return jsonify(result)
-    
+        return _perform_tool_execution(tool_name, parameters, data)
     except Exception as e:
-        logger.error(f"Tool execution error: {e}")
+        logger.error(f"Execution error: {e}")
         return jsonify({"error": str(e)}), 500
+
+@app.route("/api/tools/<tool_name>", methods=["POST"])
+@require_auth
+def execute_tool_by_name(tool_name):
+    """Specific endpoint for a tool (compatible with MCP client)"""
+    try:
+        parameters = request.json or {}
+        return _perform_tool_execution(tool_name, parameters, {})
+    except Exception as e:
+        logger.error(f"Tool route error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+def _perform_tool_execution(tool_name, parameters, options):
+    """Internal helper to execute a tool"""
+    use_cache = options.get("use_cache", True)
+    
+    if not tool_name:
+        return jsonify({"error": "tool_name is required"}), 400
+    
+    tool = tool_registry.get_tool(tool_name)
+    if not tool:
+        return jsonify({"error": f"Tool '{tool_name}' not found"}), 404
+    
+    # Check cache
+    cache_key = f"tool:{tool_name}"
+    if use_cache:
+        cached_result = cache_manager.get(cache_key, parameters)
+        if cached_result:
+            return jsonify({"result": cached_result, "cached": True})
+    
+    # Build command robustly
+    command = []
+    
+    # Handle tools that are scripts or complex commands
+    if " " in tool.command:
+        # e.g., "python tools/script.py"
+        import shlex
+        command = shlex.split(tool.command)
+    else:
+        command = [tool.command]
+    
+    # Map parameters to flags
+    for param_def in tool.parameters:
+        val = parameters.get(param_def.name)
+        if val is None:
+            continue
+            
+        if param_def.type == "boolean":
+            if val and param_def.flag:
+                command.append(param_def.flag)
+        elif param_def.flag:
+            command.append(param_def.flag)
+            command.append(str(val))
+        else:
+            # Positional
+            command.append(str(val))
+            
+    # Handle any extra parameters (like 'additional_args' or unknown ones)
+    if "additional_args" in parameters:
+        extra = parameters["additional_args"]
+        if extra:
+            import shlex
+            if isinstance(extra, str):
+                command.extend(shlex.split(extra))
+            elif isinstance(extra, list):
+                command.extend([str(x) for x in extra])
+    
+    # Execute
+    executor = CommandExecutor(command)
+    result = executor.execute()
+    
+    # Cache result
+    if result.get("success") and use_cache:
+        cache_manager.set(cache_key, result, parameters)
+    
+    return jsonify(result)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
