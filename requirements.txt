@@ -18,6 +18,7 @@ playwright>=1.40.0
 # API & HTTP Tools
 httpx>=0.24.0
 urllib3>=2.0.0
+openai>=1.0.0
 
 # Authentication & Security
 cryptography>=41.0.0

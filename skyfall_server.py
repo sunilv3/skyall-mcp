@@ -10,15 +10,18 @@ import logging
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import traceback
 import threading
 import psutil
+import requests
 from functools import wraps
-from typing import Dict, Any, Optional, List, Callable
+from typing import Dict, Any, Optional
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 from flask import Flask, request, jsonify, render_template
 from dotenv import load_dotenv
@@ -45,6 +48,7 @@ COMMAND_TIMEOUT = int(os.environ.get("COMMAND_TIMEOUT", 300))
 AUTH_ENABLED = os.environ.get("SKYFALL_AUTH_ENABLED", "false").lower() in ("1", "true", "yes", "y")
 CACHE_SIZE = int(os.environ.get("SKYFALL_CACHE_SIZE", 1000))
 CACHE_TTL = int(os.environ.get("SKYFALL_CACHE_TTL", 3600))
+AUTO_INSTALL_ENABLED = os.environ.get("SKYFALL_ENABLE_AUTO_INSTALL", "false").lower() in ("1", "true", "yes", "y")
 
 # ANSI Colors
 GREEN  = "\033[92m"
@@ -63,12 +67,177 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+def normalize_target(target: str) -> Dict[str, str]:
+    """Normalize target into URL + host forms for tool compatibility."""
+    raw = (target or "").strip()
+    if not raw:
+        return {"raw": "", "url": "", "host": ""}
+
+    # Accept host-only input and convert into URL for web tools.
+    candidate_url = raw if re.match(r"^https?://", raw, re.IGNORECASE) else f"https://{raw}"
+    parsed = urlparse(candidate_url)
+    host = parsed.netloc or parsed.path
+
+    # Remove optional auth/port for domain-oriented tools.
+    host = host.split("@")[-1].split(":")[0]
+    return {"raw": raw, "url": candidate_url, "host": host}
+
+
+def get_tool_command(tool_name: str, target_url: str, target_host: str, scan_profile: str = "balanced") -> str:
+    """Build command per tool using tuned defaults."""
+    deep_nuclei = "-severity critical,high,medium,low"
+    balanced_nuclei = "-severity critical,high,medium"
+    nuclei_severity = deep_nuclei if scan_profile == "deep" else balanced_nuclei
+
+    command_map = {
+        "nmap": f"nmap -sV -T4 -Pn {target_host}",
+        "rustscan": f"rustscan -a {target_host} --ulimit 5000 -- -sV",
+        "masscan": f"masscan {target_host} -p1-1000 --rate 2000",
+        "amass": f"amass enum -passive -d {target_host}",
+        "subfinder": f"subfinder -silent -d {target_host}",
+        "dnsenum": f"dnsenum {target_host}",
+        "fierce": f"fierce --domain {target_host}",
+        "theHarvester": f"theHarvester -d {target_host} -b all -l 100",
+        "nuclei": f"nuclei -u {target_url} {nuclei_severity} -rl 50 -c 25 -timeout 8 -retries 1",
+        "gobuster": f"gobuster dir -u {target_url} -w {{WORDLIST}} -t 40 --timeout 5s --no-error",
+        "httpx": f"httpx -silent -status-code -title -web-server -tech-detect -u {target_url}",
+        "whatweb": f"whatweb -a 3 {target_url}",
+        "nikto": f"nikto -h {target_url}",
+        "ffuf": f"ffuf -u {target_url.rstrip('/')}/FUZZ -w {{WORDLIST}} -mc all -c -ac -t 40",
+        "testssl": f"testssl --fast {target_host}",
+        "wafw00f": f"wafw00f {target_url}",
+        "waybackurls": f"echo {target_host} | waybackurls",
+        "gau": f"gau {target_host}",
+        "sqlmap": f"sqlmap -u {target_url} --batch --random-agent --level " + ("3" if scan_profile == "deep" else "1"),
+        "dalfox": f"dalfox url {target_url} --no-color --timeout 10",
+        "commix": f"commix --url {target_url} --batch --level 3",
+        "enum4linux": f"enum4linux -a {target_host}",
+        "crackmapexec": f"crackmapexec smb {target_host}",
+    }
+    
+    cmd = command_map.get(tool_name, f"{tool_name} {target_url}")
+    
+    # Add proxy arguments
+    proxy_args = proxy_manager.get_proxy_args(tool_name)
+    if proxy_args:
+        cmd += " " + " ".join(proxy_args)
+        
+    return cmd
+
+
+def get_tool_timeout(tool_name: str, scan_profile: str = "balanced") -> int:
+    base = {
+        "httpx": 60, "subfinder": 90, "gobuster": 120, "nuclei": 120, "nmap": 180, "amass": 180,
+        "whatweb": 120, "nikto": 240, "ffuf": 180, "testssl": 180, "wafw00f": 90, "waybackurls": 90,
+        "gau": 90, "dnsenum": 180, "theHarvester": 180, "fierce": 180, "rustscan": 120, "masscan": 120
+    }
+    timeout = base.get(tool_name, 120)
+    if scan_profile == "fast":
+        return max(45, int(timeout * 0.7))
+    if scan_profile == "deep":
+        return int(timeout * 1.5)
+    return timeout
+
+
+APT_TOOL_MAP = {
+    "nmap": "nmap", "amass": "amass", "subfinder": "subfinder", "gobuster": "gobuster", "httpx": "httpx-toolkit",
+    "nuclei": "nuclei", "nikto": "nikto", "whatweb": "whatweb", "ffuf": "ffuf", "testssl": "testssl.sh",
+    "wafw00f": "wafw00f", "theHarvester": "theharvester", "dnsenum": "dnsenum", "fierce": "fierce",
+    "rustscan": "rustscan", "masscan": "masscan", "sqlmap": "sqlmap", "commix": "commix",
+    "enum4linux": "enum4linux", "crackmapexec": "crackmapexec"
+}
+
+GITHUB_INSTALL_MAP = {
+    "httpx": "github.com/projectdiscovery/httpx/cmd/httpx@latest",
+    "nuclei": "github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest",
+    "subfinder": "github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest",
+    "waybackurls": "github.com/tomnomnom/waybackurls@latest",
+    "gau": "github.com/lc/gau/v2/cmd/gau@latest",
+    "ffuf": "github.com/ffuf/ffuf/v2@latest",
+    "dalfox": "github.com/hahwul/dalfox/v2@latest",
+}
+
+WORDLIST_DIR = Path("data/wordlists")
+DEFAULT_WORDLIST_PATH = "/usr/share/wordlists/dirb/common.txt"
+GITHUB_WORDLIST_URL = "https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt"
+
+
+def ensure_wordlist() -> str:
+    """Return a usable wordlist path, downloading one if needed."""
+    if os.path.exists(DEFAULT_WORDLIST_PATH):
+        return DEFAULT_WORDLIST_PATH
+
+    WORDLIST_DIR.mkdir(parents=True, exist_ok=True)
+    local_wordlist = WORDLIST_DIR / "common.txt"
+    if local_wordlist.exists():
+        return str(local_wordlist)
+
+    try:
+        resp = requests.get(GITHUB_WORDLIST_URL, timeout=30)
+        resp.raise_for_status()
+        local_wordlist.write_text(resp.text)
+        logger.info(f"Downloaded fallback wordlist: {local_wordlist}")
+        return str(local_wordlist)
+    except Exception as e:
+        logger.warning(f"Failed to download fallback wordlist: {e}")
+        return DEFAULT_WORDLIST_PATH
+
+
+def ensure_tool_available(tool_name: str, allow_install: bool = False) -> Dict[str, Any]:
+    """Check tool availability, optionally install if allowed."""
+    binary_name = tool_name.split()[0]
+    if shutil.which(binary_name):
+        return {"tool": tool_name, "available": True, "installed": False, "method": "existing"}
+
+    if not allow_install or not AUTO_INSTALL_ENABLED:
+        return {"tool": tool_name, "available": False, "installed": False, "reason": "missing"}
+
+    install_errors = []
+    apt_pkg = APT_TOOL_MAP.get(tool_name)
+    if apt_pkg:
+        apt_cmd = f"apt-get update && apt-get install -y {apt_pkg}"
+        if os.geteuid() != 0:
+            apt_cmd = f"sudo {apt_cmd}"
+        result = CommandExecutor(apt_cmd, timeout=600).execute()
+        if result.get("success") and shutil.which(binary_name):
+            return {"tool": tool_name, "available": True, "installed": True, "method": "apt"}
+        install_errors.append(result.get("stderr", "apt install failed"))
+
+    gh_pkg = GITHUB_INSTALL_MAP.get(tool_name)
+    if gh_pkg:
+        go_cmd = f"go install {gh_pkg}"
+        result = CommandExecutor(go_cmd, timeout=600).execute()
+        if result.get("success"):
+            go_bin = os.path.expanduser(f"~/go/bin/{binary_name}")
+            if os.path.exists(go_bin):
+                return {"tool": tool_name, "available": True, "installed": True, "method": "github-go-install", "path": go_bin}
+        install_errors.append(result.get("stderr", "github install failed"))
+
+    return {"tool": tool_name, "available": False, "installed": False, "reason": "install_failed", "errors": install_errors[:2]}
+
 # Initialize Flask app
 app = Flask(__name__)
 app.config["JSON_SORT_KEYS"] = False
 
+from core.mission_manager import MissionManager
+
+# Initialize core managers
+auth_manager = AuthenticationManager(enabled=AUTH_ENABLED)
+tool_registry = ToolRegistry()
+cache_manager = LRUCache(max_size=CACHE_SIZE, ttl_seconds=CACHE_TTL)
+process_manager = ProcessManager()
+decision_engine = IntelligentDecisionEngine(tool_registry)
+ai_backend = AIBackend()
+history_manager = HistoryManager()
+from core.proxy_manager import ProxyManager
+mission_manager = MissionManager()
+proxy_manager = ProxyManager()
+notifier = Notifier()
+reporter = Reporter()
+
 # Define Banner
-BANNER = fr"""
+BANNER = rf"""
 {CYAN}  ____  _                      _ _   ____        _     _             
  / ___|| | ___   _ / _/ __ _  | | | | __ )  __ _| |__ (_) ___  ___   
  \___ \| |/ / | | | |_ / _` | | | | |  _ \ / _` | '_ \| |/ _ \/ __|  
@@ -123,14 +292,12 @@ class CommandExecutor:
     def __init__(self, command, timeout: int = COMMAND_TIMEOUT):
         self.command = command
         self.timeout = timeout
-        # Use shell on Windows if command is a list to ensure path resolution
-        self.use_shell = isinstance(command, str) or (os.name == "nt")
+        self.use_shell = isinstance(command, str)
         self.process = None
         self.stdout_data = ""
         self.stderr_data = ""
         self.return_code = None
         self.timed_out = False
-        self.callback = None
     
     def execute(self) -> Dict[str, Any]:
         logger.info(f"Executing: {self.command}")
@@ -177,142 +344,6 @@ class CommandExecutor:
                 "success": False,
                 "timed_out": False
             }
-
-    def execute_async(self, callback: Optional[Callable] = None):
-        """Execute command in background thread"""
-        self.callback = callback
-        thread = threading.Thread(target=self._run_and_callback)
-        thread.daemon = True
-        thread.start()
-        return thread
-
-    def _run_and_callback(self):
-        result = self.execute()
-        if self.callback:
-            self.callback(result)
-
-
-class MissionManager:
-    """Orchestrates multi-tool missions in the background"""
-    
-    def __init__(self, tool_registry, process_manager):
-        self.missions = {}
-        self.tool_registry = tool_registry
-        self.process_manager = process_manager
-        self.lock = threading.Lock()
-
-    def start_mission(self, target: str, tools: List[str]) -> str:
-        mission_id = f"MSN-{datetime.now().strftime('%H%M%S')}"
-        with self.lock:
-            self.missions[mission_id] = {
-                "id": mission_id,
-                "target": target,
-                "status": "running",
-                "current_tool": None,
-                "logs": [],
-                "results": {},
-                "start_time": datetime.now().isoformat(),
-                "end_time": None
-            }
-        
-        thread = threading.Thread(target=self._orchestrate, args=(mission_id, target, tools))
-        thread.daemon = True
-        thread.start()
-        return mission_id
-
-    def _add_log(self, mission_id, log_type, msg):
-        with self.lock:
-            if mission_id in self.missions:
-                self.missions[mission_id]["logs"].append({
-                    "time": datetime.now().strftime("%H:%M:%S"),
-                    "type": log_type,
-                    "msg": msg
-                })
-
-    def _orchestrate(self, mission_id, target, tools):
-        self._add_log(mission_id, "SYSTEM", f"Mission started for target: {target}")
-        
-        for tool_name in tools:
-            with self.lock:
-                self.missions[mission_id]["current_tool"] = tool_name
-            
-            self._add_log(mission_id, "EXEC", f"Initializing {tool_name}...")
-            
-            tool = self.tool_registry.get_tool(tool_name)
-            if not tool:
-                self._add_log(mission_id, "ERROR", f"Tool {tool_name} not found in registry")
-                continue
-
-            # Build parameters based on tool type
-            params = {}
-            if tool.category == "web":
-                params["url"] = target if target.startswith("http") else f"http://{target}"
-            else:
-                params["target"] = target
-                params["domain"] = target
-            
-            # Construct command
-            command = self._build_command(tool, params)
-            self._add_log(mission_id, "DEBUG", f"CMD: {' '.join(command)}")
-            
-            # Execute
-            executor = CommandExecutor(command)
-            result = executor.execute()
-            
-            if result["success"]:
-                self._add_log(mission_id, "SUCCESS", f"{tool_name} completed successfully")
-                with self.lock:
-                    self.missions[mission_id]["results"][tool_name] = result["stdout"]
-            else:
-                self._add_log(mission_id, "WARN", f"{tool_name} failed or timed out")
-                if result["stderr"]:
-                    self._add_log(mission_id, "DEBUG", f"Error output: {result['stderr'][:200]}...")
-
-        with self.lock:
-            self.missions[mission_id]["status"] = "completed"
-            self.missions[mission_id]["end_time"] = datetime.now().isoformat()
-            self.missions[mission_id]["current_tool"] = None
-        
-        self._add_log(mission_id, "SYSTEM", "Mission deployment complete. Results ready for analysis.")
-
-    def _build_command(self, tool, parameters):
-        if " " in tool.command:
-            import shlex
-            command = shlex.split(tool.command)
-        else:
-            command = [tool.command]
-        
-        for param_def in tool.parameters:
-            val = parameters.get(param_def.name)
-            if val is not None:
-                if param_def.type == "boolean":
-                    if val and param_def.flag: command.append(param_def.flag)
-                elif param_def.flag:
-                    command.append(param_def.flag)
-                    command.append(str(val))
-                else:
-                    command.append(str(val))
-        return command
-
-    def get_status(self, mission_id):
-        with self.lock:
-            return self.missions.get(mission_id)
-
-
-# ═════════════════════════════════════════════════════════════════════════════
-# INITIALIZE CORE MANAGERS
-# ═════════════════════════════════════════════════════════════════════════════
-
-auth_manager = AuthenticationManager(enabled=AUTH_ENABLED)
-tool_registry = ToolRegistry()
-cache_manager = LRUCache(max_size=CACHE_SIZE, ttl_seconds=CACHE_TTL)
-process_manager = ProcessManager()
-mission_manager = MissionManager(tool_registry, process_manager)
-decision_engine = IntelligentDecisionEngine(tool_registry)
-ai_backend = AIBackend()
-history_manager = HistoryManager()
-notifier = Notifier()
-reporter = Reporter()
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -416,86 +447,38 @@ def execute_tool():
         data = request.json or {}
         tool_name = data.get("tool_name", "")
         parameters = data.get("parameters", {})
-        return _perform_tool_execution(tool_name, parameters, data)
+        use_cache = data.get("use_cache", True)
+        
+        if not tool_name:
+            return jsonify({"error": "tool_name is required"}), 400
+        
+        tool = tool_registry.get_tool(tool_name)
+        if not tool:
+            return jsonify({"error": f"Tool '{tool_name}' not found"}), 404
+        
+        # Check cache
+        cache_key = f"tool:{tool_name}"
+        if use_cache:
+            cached_result = cache_manager.get(cache_key, parameters)
+            if cached_result:
+                return jsonify({"result": cached_result, "cached": True})
+        
+        # Build command
+        command = [tool.command] + [str(v) for v in parameters.values()]
+        
+        # Execute
+        executor = CommandExecutor(command)
+        result = executor.execute()
+        
+        # Cache result
+        if result.get("success") and use_cache:
+            cache_manager.set(cache_key, result, parameters)
+        
+        return jsonify(result)
+    
     except Exception as e:
-        logger.error(f"Execution error: {e}")
+        logger.error(f"Tool execution error: {e}")
         return jsonify({"error": str(e)}), 500
-
-@app.route("/api/tools/<tool_name>", methods=["POST"])
-@require_auth
-def execute_tool_by_name(tool_name):
-    """Specific endpoint for a tool (compatible with MCP client)"""
-    try:
-        parameters = request.json or {}
-        return _perform_tool_execution(tool_name, parameters, {})
-    except Exception as e:
-        logger.error(f"Tool route error: {e}")
-        return jsonify({"error": str(e)}), 500
-
-def _perform_tool_execution(tool_name, parameters, options):
-    """Internal helper to execute a tool"""
-    use_cache = options.get("use_cache", True)
-    
-    if not tool_name:
-        return jsonify({"error": "tool_name is required"}), 400
-    
-    tool = tool_registry.get_tool(tool_name)
-    if not tool:
-        return jsonify({"error": f"Tool '{tool_name}' not found"}), 404
-    
-    # Check cache
-    cache_key = f"tool:{tool_name}"
-    if use_cache:
-        cached_result = cache_manager.get(cache_key, parameters)
-        if cached_result:
-            return jsonify({"result": cached_result, "cached": True})
-    
-    # Build command robustly
-    command = []
-    
-    # Handle tools that are scripts or complex commands
-    if " " in tool.command:
-        # e.g., "python tools/script.py"
-        import shlex
-        command = shlex.split(tool.command)
-    else:
-        command = [tool.command]
-    
-    # Map parameters to flags
-    for param_def in tool.parameters:
-        val = parameters.get(param_def.name)
-        if val is None:
-            continue
-            
-        if param_def.type == "boolean":
-            if val and param_def.flag:
-                command.append(param_def.flag)
-        elif param_def.flag:
-            command.append(param_def.flag)
-            command.append(str(val))
-        else:
-            # Positional
-            command.append(str(val))
-            
-    # Handle any extra parameters (like 'additional_args' or unknown ones)
-    if "additional_args" in parameters:
-        extra = parameters["additional_args"]
-        if extra:
-            import shlex
-            if isinstance(extra, str):
-                command.extend(shlex.split(extra))
-            elif isinstance(extra, list):
-                command.extend([str(x) for x in extra])
-    
-    # Execute
-    executor = CommandExecutor(command)
-    result = executor.execute()
-    
-    # Cache result
-    if result.get("success") and use_cache:
-        cache_manager.set(cache_key, result, parameters)
-    
-    return jsonify(result)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -637,46 +620,6 @@ def telemetry():
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# MISSION CONTROL
-# ═════════════════════════════════════════════════════════════════════════════
-
-@app.route("/api/mission/start", methods=["POST"])
-@require_auth
-def start_mission():
-    """Start an autonomous mission against a target"""
-    try:
-        data = request.json or {}
-        target = data.get("target", "")
-        
-        if not target:
-            return jsonify({"error": "target is required"}), 400
-            
-        # Get suggested tools
-        analysis = decision_engine.analyze_target(target)
-        tools = analysis.get("suggested_tools", ["nmap"])
-        
-        mission_id = mission_manager.start_mission(target, tools)
-        return jsonify({
-            "mission_id": mission_id,
-            "target": target,
-            "tools": tools,
-            "status": "started"
-        })
-    except Exception as e:
-        logger.error(f"Mission start error: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/api/mission/status/<mission_id>", methods=["GET"])
-@require_auth
-def get_mission_status(mission_id):
-    """Get status and logs for a mission"""
-    status = mission_manager.get_status(mission_id)
-    if status:
-        return jsonify(status)
-    return jsonify({"error": "Mission not found"}), 404
-
-
-# ═════════════════════════════════════════════════════════════════════════════
 # GENERIC COMMAND EXECUTION (backward compatible)
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -721,23 +664,139 @@ def generic_command():
 @require_auth
 def analyze_target():
     """
-    AI-powered target analysis
-    Suggests optimal tools and testing strategies using IntelligentDecisionEngine
+    AI-powered target analysis and mission initiation
     """
     try:
         data = request.json or {}
         target = data.get("target", "")
         context = data.get("context", {})
+        allow_install = True  # Always allow install to avoid skipping tools as requested
+        scan_profile = str(context.get("scan_profile", "balanced")).lower()
+        owasp_mode = bool(context.get("owasp_top10_mode", False))
+        agent_name = "RedTeamer" if str(context.get("agent_profile", "bugbounty")).lower().startswith("red") else "BugBounty-1"
         
         if not target:
             return jsonify({"error": "target is required"}), 400
         
+        # 1. Analyze target and get strategy
         analysis = decision_engine.analyze_target(target, context)
-        return jsonify(analysis)
+        tools = list(analysis.get("suggested_tools", []))
+        
+        # 2. Initialize Mission in Manager
+        mission_id = mission_manager.start_mission(target, tools)
+        
+        # 3. Launch background mission thread
+        def run_mission(target, analysis, mission_id):
+            try:
+                full_results = []
+                execution_details = []
+                normalized_target = normalize_target(target)
+                target_url = normalized_target["url"]
+                target_host = normalized_target["host"]
+                wordlist_path = ensure_wordlist()
+                
+                for tool_name in tools:
+                    mission_manager.update_status(mission_id, "RUNNING", current_tool=tool_name, log=f"Starting engine: {tool_name}")
+                    
+                    availability = ensure_tool_available(tool_name, allow_install=allow_install)
+                    if not availability.get("available"):
+                        logger.warning(f"Tool {tool_name} not found or unavailable.")
+                        mission_manager.update_status(mission_id, "RUNNING", log=f"Tool '{tool_name}' unavailable. Phase skipped.")
+                        full_results.append(f"--- TOOL: {tool_name} ---\n[ERROR] Tool not installed on host system.\n")
+                        execution_details.append({
+                            "tool": tool_name,
+                            "command": "",
+                            "success": False,
+                            "timed_out": False,
+                            "return_code": -1,
+                            "stdout": "",
+                            "stderr": "Tool unavailable or installation failed"
+                        })
+                        continue
+                    if availability.get("installed"):
+                        mission_manager.update_status(mission_id, "RUNNING", log=f"Installed missing tool '{tool_name}' via {availability.get('method')}.")
+
+                    cmd = get_tool_command(tool_name, target_url, target_host, scan_profile=scan_profile)
+                    if "{WORDLIST}" in cmd:
+                        cmd = cmd.replace("{WORDLIST}", wordlist_path)
+                    timeout = get_tool_timeout(tool_name, scan_profile=scan_profile)
+                    executor = CommandExecutor(cmd, timeout=timeout)
+                    result = executor.execute()
+                    execution_details.append({
+                        "tool": tool_name,
+                        "command": cmd,
+                        "success": bool(result.get("success")),
+                        "timed_out": bool(result.get("timed_out")),
+                        "return_code": result.get("return_code"),
+                        "stdout": result.get("stdout", ""),
+                        "stderr": result.get("stderr", "")
+                    })
+                    
+                    if result.get("success") or result.get("partial_results"):
+                        mission_manager.complete_tool(mission_id, tool_name)
+                        output = result.get('stdout', '')
+                        if not output: output = "[INFO] Tool executed but returned no output."
+                        mission_manager.update_status(mission_id, "RUNNING", log=f"Engine {tool_name} completed. RAW OUTPUT:\n{output}")
+                        full_results.append(f"--- TOOL: {tool_name} ---\n{output}\n")
+                    else:
+                        error_msg = result.get('stderr', 'Unknown error')
+                        if result.get("timed_out"):
+                            mission_manager.update_status(
+                                mission_id,
+                                "RUNNING",
+                                log=f"Engine {tool_name} timed out after {timeout}s. Continuing with partial results."
+                            )
+                        else:
+                            mission_manager.update_status(mission_id, "RUNNING", log=f"Engine {tool_name} failed: {error_msg[:50]}...")
+                        full_results.append(f"--- TOOL: {tool_name} ---\n[FAILED] {error_msg}\n")
+                    
+                # 4. AI Analysis
+                mission_manager.update_status(mission_id, "ANALYZING", log="AI analysis in progress...")
+                consolidated_output = "\n".join(full_results)
+                if owasp_mode:
+                    mission_manager.update_status(mission_id, "ANALYZING", log="OWASP Top 10 analysis in progress...")
+                    final_analysis = ai_backend.analyze_owasp_top10(consolidated_output, target=target)
+                else:
+                    final_analysis = ai_backend.analyze_vulnerability(consolidated_output)
+                
+                # 5. Save to history
+                history_manager.save_scan(
+                    target=target,
+                    agent=agent_name + ("-OWASP" if owasp_mode else ""),
+                    status="COMPLETED",
+                    analysis=final_analysis.get("analysis", ""),
+                    execution_details=execution_details
+                )
+                mission_manager.update_status(mission_id, "COMPLETED", log="Mission complete.")
+                
+            except Exception as e:
+                logger.error(f"Mission {mission_id} failed: {e}")
+                mission_manager.update_status(mission_id, "FAILED", log=f"Error: {str(e)}")
+
+        thread = threading.Thread(target=run_mission, args=(target, analysis, mission_id))
+        thread.daemon = True
+        thread.start()
+        
+        return jsonify({
+            "mission_id": mission_id,
+            "message": "Mission initiated",
+            "strategy": analysis.get("recommended_strategy"),
+            "tools": tools,
+            "agent_profile": analysis.get("agent_profile", "bugbounty"),
+            "scan_profile": analysis.get("scan_profile", scan_profile),
+            "owasp_top10_mode": analysis.get("owasp_top10_mode", owasp_mode)
+        })
     
     except Exception as e:
         logger.error(f"Analysis error: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/mission/<mission_id>/status", methods=["GET"])
+@require_auth
+def get_mission_status(mission_id):
+    """Get real-time status of a specific mission"""
+    return jsonify(mission_manager.get_status(mission_id))
 
 
 @app.route("/api/intelligence/select-tools", methods=["POST"])
@@ -854,6 +913,107 @@ def ai_analyze():
     except Exception as e:
         logger.error(f"AI Analysis error: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/tools/ensure", methods=["POST"])
+@require_auth
+def ensure_tools():
+    """
+    Validate required tools on Kali and optionally install missing tools
+    using APT / GitHub go-install when explicitly enabled.
+    """
+    try:
+        data = request.json or {}
+        tools = data.get("tools", [])
+        allow_install = bool(data.get("allow_install", False))
+
+        if not isinstance(tools, list) or not tools:
+            return jsonify({"error": "tools list is required"}), 400
+
+        results = [ensure_tool_available(t, allow_install=allow_install) for t in tools]
+        ready = all(r.get("available") for r in results)
+        return jsonify({
+            "auto_install_enabled": AUTO_INSTALL_ENABLED,
+            "allow_install": allow_install,
+            "ready": ready,
+            "results": results
+        })
+    except Exception as e:
+        logger.error(f"Ensure tools error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/interactive/chat", methods=["POST"])
+@require_auth
+def interactive_chat():
+    """
+    Handle direct interaction from the Live Interactive UI
+    """
+    try:
+        data = request.json or {}
+        message = data.get("message", "")
+        mission_id = data.get("mission_id")
+        
+        if not message:
+            return jsonify({"error": "Message is required"}), 400
+            
+        # 1. Use AI to interpret the message
+        # If it looks like a command, we can run it
+        # 1. Use AI to interpret the message intent
+        intent_prompt = f"""
+        Analyze the user's message: '{message}'
+        Determine if the user wants:
+        1. A FULL autonomous penetration test (multi-tool scan).
+        2. To run a SINGLE specific tool/command.
+        3. Just a general chat/question.
+        
+        If it's a FULL PT, return: 'FULL_PT: <target>'
+        If it's a SINGLE command, return: 'EXECUTE: <command>'
+        Otherwise, return a conversational response.
+        """
+        ai_response = ai_backend.query(intent_prompt, "You are a specialized Red Teamer and mission controller.")
+        
+        if ai_response.startswith("FULL_PT:"):
+            target = ai_response.replace("FULL_PT:", "").strip()
+            if target and ("." in target or "localhost" in target):
+                return jsonify({
+                    "response": f"Affirmative. Initializing Full Blackhat-style Penetration Test for: `{target}`. Engaging mission protocols.",
+                    "action": "start_mission",
+                    "target": target
+                })
+
+        if ai_response.startswith("EXECUTE:"):
+            command = ai_response.replace("EXECUTE:", "").strip()
+            tool_name = command.split()[0]
+            
+            # Execute the command
+            executor = CommandExecutor(command, timeout=300)
+            result = executor.execute()
+            output = result.get("stdout") or result.get("stderr") or "No output from command."
+            
+            return jsonify({
+                "response": f"Task Executed: `{command}`\n\nOUTPUT:\n{output}",
+                "action": "execute",
+                "command": command,
+                "tool": tool_name,
+                "output": output
+            })
+        
+        return jsonify({
+            "response": ai_response,
+            "action": "none"
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/history/delete/<scan_id>", methods=["DELETE"])
+@require_auth
+def delete_history(scan_id):
+    """Delete a scan from history"""
+    if history_manager.delete_scan(scan_id):
+        return jsonify({"success": True})
+    return jsonify({"error": "Scan not found"}), 404
 
 
 # ═════════════════════════════════════════════════════════════════════════════

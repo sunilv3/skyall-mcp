@@ -8,6 +8,8 @@ import logging
 import re
 from typing import Dict, List, Any, Optional, Tuple
 
+from core.evasion_manager import EvasionManager
+
 logger = logging.getLogger(__name__)
 
 class IntelligentDecisionEngine:
@@ -16,12 +18,10 @@ class IntelligentDecisionEngine:
     def __init__(self, tool_registry):
         """
         Initialize the decision engine
-        
-        Args:
-            tool_registry: The ToolRegistry instance
         """
         self.tool_registry = tool_registry
-        self.vuln_intelligence = {} # Placeholder for CVE/Intel data
+        self.evasion_manager = EvasionManager()
+        self.vuln_intelligence = {} 
 
     def analyze_target(self, target: str, context: Dict = None) -> Dict[str, Any]:
         """
@@ -36,18 +36,26 @@ class IntelligentDecisionEngine:
         """
         logger.info(f"Analyzing target: {target}")
         
+        context = context or {}
+
         # Determine target type
         target_type = self._determine_target_type(target)
-        
-        # Select initial reconnaissance tools
-        recon_tools = self._select_recon_tools(target_type)
+        scan_profile = str(context.get("scan_profile", "balanced")).lower()
+        agent_profile = str(context.get("agent_profile", "bugbounty")).lower()
+        owasp_mode = bool(context.get("owasp_top10_mode", False))
+
+        # Select phase tools based on profile and agent type
+        recon_tools = self._select_recon_tools(target_type, scan_profile, agent_profile, owasp_mode)
         
         return {
             "target": target,
             "target_type": target_type,
             "recommended_strategy": self._get_strategy_description(target_type),
             "suggested_tools": recon_tools,
-            "estimated_priority": "high" if target_type == "web" else "medium"
+            "estimated_priority": "high" if target_type == "web" else "medium",
+            "scan_profile": scan_profile,
+            "agent_profile": agent_profile,
+            "owasp_top10_mode": owasp_mode
         }
 
     def select_tools(self, target: str, objectives: List[str]) -> List[Dict]:
@@ -71,24 +79,22 @@ class IntelligentDecisionEngine:
 
     def optimize_parameters(self, tool_name: str, parameters: Dict, target_info: Dict = None) -> Dict:
         """
-        Optimize tool parameters based on target context
-        
-        Args:
-            tool_name: Name of the tool
-            parameters: Initial parameters
-            target_info: Information about the target (e.g., OS, tech stack)
-            
-        Returns:
-            Optimized parameters
+        Optimize tool parameters based on target context and stealth requirements
         """
         optimized = parameters.copy()
         
-        # Example optimization: adjust nmap timing based on network speed
+        # Apply stealth/evasion arguments
+        evasion_args = self.evasion_manager.get_evasion_args(tool_name)
+        if evasion_args:
+            current_args = optimized.get("additional_args", "")
+            optimized["additional_args"] = f"{current_args} {' '.join(evasion_args)}".strip()
+            logger.info(f"Stealth Mode: Applied evasion parameters for {tool_name}")
+
+        # Standard optimizations
         if tool_name == "nmap":
             if "-T" not in optimized.get("additional_args", ""):
                 optimized["additional_args"] = optimized.get("additional_args", "") + " -T4"
         
-        # Example optimization: set wordlists for gobuster
         if tool_name == "gobuster" and not optimized.get("wordlist"):
             optimized["wordlist"] = "/usr/share/wordlists/dirb/common.txt"
             
@@ -125,13 +131,57 @@ class IntelligentDecisionEngine:
             return "domain"
         return "unknown"
 
-    def _select_recon_tools(self, target_type: str) -> List[str]:
-        """Suggest tools for initial phase"""
+    def _select_recon_tools(
+        self,
+        target_type: str,
+        scan_profile: str = "balanced",
+        agent_profile: str = "bugbounty",
+        owasp_mode: bool = False,
+    ) -> List[str]:
+        """Suggest tools for initial phase with profile-aware depth."""
+        base = []
         if target_type == "web":
-            return ["nuclei", "httpx", "gobuster"]
-        if target_type == "domain":
-            return ["amass", "subfinder", "nmap"]
-        return ["nmap", "rustscan"]
+            base = ["nuclei", "httpx", "gobuster"]
+        elif target_type == "domain":
+            base = ["amass", "subfinder", "nmap"]
+        else:
+            base = ["nmap", "rustscan"]
+
+        # Profile expansion controls scan depth and speed.
+        if scan_profile == "fast":
+            base = [t for t in base if t in ("httpx", "nuclei", "nmap", "subfinder", "rustscan")]
+        elif scan_profile == "deep":
+            if target_type == "web":
+                base.extend(["whatweb", "nikto", "ffuf", "testssl", "sqlmap", "dalfox"])
+            elif target_type == "domain":
+                base.extend(["theHarvester", "dnsenum"])
+            else:
+                base.extend(["masscan"])
+
+        # RedTeamer profile includes broader authorized assessment visibility.
+        if agent_profile in ("redteamer", "red-teamer", "red_teamer"):
+            if target_type == "web":
+                base.extend(["wafw00f", "waybackurls", "gau", "commix", "sqlmap", "dalfox"])
+            elif target_type == "domain":
+                base.extend(["theHarvester", "fierce", "enum4linux"])
+            else:
+                base.extend(["masscan", "crackmapexec"])
+
+        if owasp_mode and target_type == "web":
+            # OWASP Top 10-focused stack for authorized web assessments.
+            base.extend([
+                "httpx", "whatweb", "nuclei", "nikto", "testssl", "wafw00f",
+                "gobuster", "ffuf", "waybackurls", "gau"
+            ])
+
+        # preserve order, remove duplicates
+        seen = set()
+        ordered = []
+        for tool in base:
+            if tool not in seen:
+                seen.add(tool)
+                ordered.append(tool)
+        return ordered
 
     def _get_strategy_description(self, target_type: str) -> str:
         strategies = {

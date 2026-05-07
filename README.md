@@ -33,7 +33,7 @@ Skyfall AI v7.0 is a next-generation cybersecurity framework that combines **Aut
 ## 🛠️ Technology Stack
 - **Backend**: Python 3.11, Flask, MCP (Model Context Protocol).
 - **Frontend**: Premium Vanilla CSS, HTML5, JavaScript (Real-time Polling).
-- **AI Backend**: OpenRouter, Google AI (Gemini), NVIDIA NIM.
+- **AI Backend**: OpenRouter, Google AI (Gemini), NVIDIA NIM, **Ollama (Open-Source Local Models)**.
 - **OS Environment**: Kali Linux (Dockerized).
 
 ## 🚦 Quick Start
@@ -44,6 +44,20 @@ Create a `.env` file from the example and add your AI keys:
 OPENROUTER_API_KEY=your_key_here
 NVIDIA_API_KEY=your_key_here
 ```
+
+### 1.1 Open-Source Model Mode (No paid API required)
+Run with local OSS models using Ollama:
+```bash
+# Install/start Ollama separately, then pull a model:
+ollama pull llama3.1:8b
+
+# .env
+SKYFALL_OSS_MODE=true
+SKYFALL_OSS_BASE_URL=http://127.0.0.1:11434/v1
+SKYFALL_OSS_API_KEY=ollama
+SKYFALL_OSS_MODEL=llama3.1:8b
+```
+When enabled, Skyfall uses local OSS model first and automatically falls back to cloud providers only if the local call fails.
 
 ### 2. Deploy with Docker (Recommended)
 ```bash
