@@ -226,29 +226,79 @@
             });
         }
 
+        let activeMissionId = null;
+        let pollInterval = null;
+
         async function startScan() {
             const target = document.getElementById('target-input').value;
             if (!target) return alert("Enter a target!");
-            addLog('AGENT', `Deploying BugBounty-1 to ${target}...`);
+            
+            // Clear console
+            document.getElementById('console').innerHTML = '';
+            addLog('SYSTEM', `Initializing mission for ${target}...`);
             
             try {
-                const response = await fetch('/api/intelligence/analyze-target', {
+                const response = await fetch('/api/mission/start', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ target })
                 });
                 const data = await response.json();
-                addLog('INTEL', `Strategy: ${data.recommended_strategy}`);
-                data.suggested_tools.forEach((t, i) => setTimeout(() => addLog('EXEC', `Running ${t}...`), (i+1)*2000));
-            } catch (e) { addLog('ERROR', 'Scan failed.'); }
+                
+                if (data.mission_id) {
+                    activeMissionId = data.mission_id;
+                    addLog('MISSION', `Mission ${data.mission_id} started. Deploying tools: ${data.tools.join(', ')}`);
+                    
+                    // Start polling
+                    if (pollInterval) clearInterval(pollInterval);
+                    pollInterval = setInterval(pollMissionStatus, 2000);
+                } else {
+                    addLog('ERROR', 'Failed to start mission: ' + (data.error || 'Unknown error'));
+                }
+            } catch (e) { 
+                addLog('ERROR', 'Network error while starting mission.'); 
+                console.error(e);
+            }
         }
 
-        function addLog(type, msg) {
+        async function pollMissionStatus() {
+            if (!activeMissionId) return;
+            
+            try {
+                const response = await fetch(`/api/mission/status/${activeMissionId}`);
+                const data = await response.json();
+                
+                if (data.logs) {
+                    // Update console with new logs
+                    const consoleElem = document.getElementById('console');
+                    const currentLogCount = consoleElem.querySelectorAll('.log-entry').length;
+                    
+                    if (data.logs.length > currentLogCount) {
+                        for (let i = currentLogCount; i < data.logs.length; i++) {
+                            const log = data.logs[i];
+                            addLog(log.type, log.msg, log.time);
+                        }
+                    }
+                }
+                
+                if (data.status === 'completed') {
+                    addLog('SYSTEM', 'Mission completed. Check results for details.');
+                    clearInterval(pollInterval);
+                    activeMissionId = null;
+                    updateStats();
+                    loadHistory();
+                }
+            } catch (e) {
+                console.error('Polling error:', e);
+            }
+        }
+
+        function addLog(type, msg, time = null) {
             const console = document.getElementById('console');
             const entry = document.createElement('div');
             entry.className = 'log-entry';
-            const time = new Date().toLocaleTimeString();
-            entry.innerHTML = `<span class="log-time">[${time}]</span> <span class="log-type">[${type}]</span> <span class="log-msg">${msg}</span>`;
+            const displayTime = time || new Date().toLocaleTimeString();
+            entry.innerHTML = `<span class="log-time">[${displayTime}]</span> <span class="log-type">[${type}]</span> <span class="log-msg">${msg}</span>`;
             console.appendChild(entry);
             console.scrollTop = console.scrollHeight;
         }
@@ -259,6 +309,7 @@
                 const data = await response.json();
                 document.getElementById('dash-tools').innerText = data.tools.total;
                 document.getElementById('dash-cpu').innerText = data.system.cpu_percent + '%';
+                document.getElementById('dash-vulns').innerText = data.processes.summary.total_processes || 0;
             } catch (e) {}
         }
 

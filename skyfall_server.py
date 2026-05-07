@@ -72,6 +72,7 @@ auth_manager = AuthenticationManager(enabled=AUTH_ENABLED)
 tool_registry = ToolRegistry()
 cache_manager = LRUCache(max_size=CACHE_SIZE, ttl_seconds=CACHE_TTL)
 process_manager = ProcessManager()
+mission_manager = MissionManager(tool_registry, process_manager)
 decision_engine = IntelligentDecisionEngine(tool_registry)
 ai_backend = AIBackend()
 history_manager = HistoryManager()
@@ -141,6 +142,7 @@ class CommandExecutor:
         self.stderr_data = ""
         self.return_code = None
         self.timed_out = False
+        self.callback = None
     
     def execute(self) -> Dict[str, Any]:
         logger.info(f"Executing: {self.command}")
@@ -187,6 +189,126 @@ class CommandExecutor:
                 "success": False,
                 "timed_out": False
             }
+
+    def execute_async(self, callback: Optional[Callable] = None):
+        """Execute command in background thread"""
+        self.callback = callback
+        thread = threading.Thread(target=self._run_and_callback)
+        thread.daemon = True
+        thread.start()
+        return thread
+
+    def _run_and_callback(self):
+        result = self.execute()
+        if self.callback:
+            self.callback(result)
+
+
+class MissionManager:
+    """Orchestrates multi-tool missions in the background"""
+    
+    def __init__(self, tool_registry, process_manager):
+        self.missions = {}
+        self.tool_registry = tool_registry
+        self.process_manager = process_manager
+        self.lock = threading.Lock()
+
+    def start_mission(self, target: str, tools: List[str]) -> str:
+        mission_id = f"MSN-{datetime.now().strftime('%H%M%S')}"
+        with self.lock:
+            self.missions[mission_id] = {
+                "id": mission_id,
+                "target": target,
+                "status": "running",
+                "current_tool": None,
+                "logs": [],
+                "results": {},
+                "start_time": datetime.now().isoformat(),
+                "end_time": None
+            }
+        
+        thread = threading.Thread(target=self._orchestrate, args=(mission_id, target, tools))
+        thread.daemon = True
+        thread.start()
+        return mission_id
+
+    def _add_log(self, mission_id, log_type, msg):
+        with self.lock:
+            if mission_id in self.missions:
+                self.missions[mission_id]["logs"].append({
+                    "time": datetime.now().strftime("%H:%M:%S"),
+                    "type": log_type,
+                    "msg": msg
+                })
+
+    def _orchestrate(self, mission_id, target, tools):
+        self._add_log(mission_id, "SYSTEM", f"Mission started for target: {target}")
+        
+        for tool_name in tools:
+            with self.lock:
+                self.missions[mission_id]["current_tool"] = tool_name
+            
+            self._add_log(mission_id, "EXEC", f"Initializing {tool_name}...")
+            
+            tool = self.tool_registry.get_tool(tool_name)
+            if not tool:
+                self._add_log(mission_id, "ERROR", f"Tool {tool_name} not found in registry")
+                continue
+
+            # Build parameters based on tool type
+            params = {}
+            if tool.category == "web":
+                params["url"] = target if target.startswith("http") else f"http://{target}"
+            else:
+                params["target"] = target
+                params["domain"] = target
+            
+            # Construct command
+            command = self._build_command(tool, params)
+            self._add_log(mission_id, "DEBUG", f"CMD: {' '.join(command)}")
+            
+            # Execute
+            executor = CommandExecutor(command)
+            result = executor.execute()
+            
+            if result["success"]:
+                self._add_log(mission_id, "SUCCESS", f"{tool_name} completed successfully")
+                with self.lock:
+                    self.missions[mission_id]["results"][tool_name] = result["stdout"]
+            else:
+                self._add_log(mission_id, "WARN", f"{tool_name} failed or timed out")
+                if result["stderr"]:
+                    self._add_log(mission_id, "DEBUG", f"Error output: {result['stderr'][:200]}...")
+
+        with self.lock:
+            self.missions[mission_id]["status"] = "completed"
+            self.missions[mission_id]["end_time"] = datetime.now().isoformat()
+            self.missions[mission_id]["current_tool"] = None
+        
+        self._add_log(mission_id, "SYSTEM", "Mission deployment complete. Results ready for analysis.")
+
+    def _build_command(self, tool, parameters):
+        if " " in tool.command:
+            import shlex
+            command = shlex.split(tool.command)
+        else:
+            command = [tool.command]
+        
+        for param_def in tool.parameters:
+            val = parameters.get(param_def.name)
+            if val is not None:
+                if param_def.type == "boolean":
+                    if val and param_def.flag: command.append(param_def.flag)
+                elif param_def.flag:
+                    command.append(param_def.flag)
+                    command.append(str(val))
+                else:
+                    command.append(str(val))
+        return command
+
+    def get_status(self, mission_id):
+        with self.lock:
+            return self.missions.get(mission_id)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -508,6 +630,46 @@ def telemetry():
             "memory_percent": round(psutil.virtual_memory().percent, 2)
         }
     })
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# MISSION CONTROL
+# ═════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/mission/start", methods=["POST"])
+@require_auth
+def start_mission():
+    """Start an autonomous mission against a target"""
+    try:
+        data = request.json or {}
+        target = data.get("target", "")
+        
+        if not target:
+            return jsonify({"error": "target is required"}), 400
+            
+        # Get suggested tools
+        analysis = decision_engine.analyze_target(target)
+        tools = analysis.get("suggested_tools", ["nmap"])
+        
+        mission_id = mission_manager.start_mission(target, tools)
+        return jsonify({
+            "mission_id": mission_id,
+            "target": target,
+            "tools": tools,
+            "status": "started"
+        })
+    except Exception as e:
+        logger.error(f"Mission start error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/mission/status/<mission_id>", methods=["GET"])
+@require_auth
+def get_mission_status(mission_id):
+    """Get status and logs for a mission"""
+    status = mission_manager.get_status(mission_id)
+    if status:
+        return jsonify(status)
+    return jsonify({"error": "Mission not found"}), 404
 
 
 # ═════════════════════════════════════════════════════════════════════════════
