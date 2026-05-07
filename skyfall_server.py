@@ -67,18 +67,6 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 app.config["JSON_SORT_KEYS"] = False
 
-# Initialize core managers
-auth_manager = AuthenticationManager(enabled=AUTH_ENABLED)
-tool_registry = ToolRegistry()
-cache_manager = LRUCache(max_size=CACHE_SIZE, ttl_seconds=CACHE_TTL)
-process_manager = ProcessManager()
-mission_manager = MissionManager(tool_registry, process_manager)
-decision_engine = IntelligentDecisionEngine(tool_registry)
-ai_backend = AIBackend()
-history_manager = HistoryManager()
-notifier = Notifier()
-reporter = Reporter()
-
 # Define Banner
 BANNER = f"""
 {CYAN}  ____  _                      _ _   ____        _     _             
@@ -309,6 +297,22 @@ class MissionManager:
     def get_status(self, mission_id):
         with self.lock:
             return self.missions.get(mission_id)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# INITIALIZE CORE MANAGERS
+# ═════════════════════════════════════════════════════════════════════════════
+
+auth_manager = AuthenticationManager(enabled=AUTH_ENABLED)
+tool_registry = ToolRegistry()
+cache_manager = LRUCache(max_size=CACHE_SIZE, ttl_seconds=CACHE_TTL)
+process_manager = ProcessManager()
+mission_manager = MissionManager(tool_registry, process_manager)
+decision_engine = IntelligentDecisionEngine(tool_registry)
+ai_backend = AIBackend()
+history_manager = HistoryManager()
+notifier = Notifier()
+reporter = Reporter()
 
 
 # ═════════════════════════════════════════════════════════════════════════════
