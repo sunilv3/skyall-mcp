@@ -68,7 +68,7 @@ app = Flask(__name__)
 app.config["JSON_SORT_KEYS"] = False
 
 # Define Banner
-BANNER = f"""
+BANNER = fr"""
 {CYAN}  ____  _                      _ _   ____        _     _             
  / ___|| | ___   _ / _/ __ _  | | | | __ )  __ _| |__ (_) ___  ___   
  \___ \| |/ / | | | |_ / _` | | | | |  _ \ / _` | '_ \| |/ _ \/ __|  
