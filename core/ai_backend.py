@@ -24,7 +24,7 @@ class AIBackend:
         self.oss_api_key = os.environ.get("SKYFALL_OSS_API_KEY", "ollama")
         self.oss_model = os.environ.get("SKYFALL_OSS_MODEL", "llama3.1:8b")
         
-        self.default_model = os.environ.get("SKYFALL_MODEL", "openai/gpt-4o")
+        self.default_model = os.environ.get("SKYFALL_MODEL", "mistralai/mistral-nemotron")
         self.proxy_manager = ProxyManager()
         
         # Build proxy dict for httpx
@@ -99,9 +99,9 @@ class AIBackend:
 
 
         
-        # Add local Gemini as a final robust fallback if key exists
+        # Add local Gemini as a robust fallback higher in the chain
         if self.google_key:
-            models_to_try.append("google/gemini-direct")
+            models_to_try.insert(3, "google/gemini-direct")
 
         last_error = None
         for model in models_to_try:
@@ -112,8 +112,17 @@ class AIBackend:
                 if model == "google/gemini-direct" and self.google_key:
                     return self._query_google(prompt, system_prompt)
                 
-                if self.nvidia_client and any(x in model.lower() for x in ["nvidia", "mistral", "meta"]):
+                # Define models hosted on NVIDIA NIM
+                nvidia_nim_models = [
+                    "mistralai/mistral-nemotron",
+                    "meta/llama-3.1-70b-instruct",
+                    "nvidia/llama-3.1-nemotron-70b-instruct",
+                    "nvidia/nemotron-70b-instruct"
+                ]
+                
+                if self.nvidia_client and model in nvidia_nim_models:
                     return self._query_client(self.nvidia_client, model, prompt, system_prompt)
+
                 elif self.openrouter_client:
                     return self._query_client(self.openrouter_client, model, prompt, system_prompt)
                 elif self.google_key and "google" in model.lower():
