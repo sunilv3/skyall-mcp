@@ -76,19 +76,21 @@ class AIBackend:
 
         models_to_try = [self.default_model]
         
-        # If using a free model, add other powerful free models as fallbacks
-        if "free" in self.default_model or "nvidia" in self.default_model or "google" in self.default_model:
-            fallbacks = [
-                "openrouter/free",
-                "meta-llama/llama-3.3-70b-instruct:free",
-                "google/gemma-2-9b-it:free",
-                "mistralai/mistral-7b-instruct:free",
-                "nousresearch/hermes-3-llama-3.1-405b:free",
-                "google/gemini-flash-1.5:free"
-            ]
-            for f in fallbacks:
-                if f not in models_to_try:
-                    models_to_try.append(f)
+        # Define high-quality free/low-cost fallbacks
+        fallbacks = [
+            "google/gemini-2.0-flash-lite-preview-02-05:free",
+            "meta-llama/llama-3.3-70b-instruct:free",
+            "deepseek/deepseek-chat:free",
+            "google/gemini-flash-1.5:free",
+            "mistralai/mistral-7b-instruct:free",
+            "nvidia/llama-3.1-nemotron-70b-instruct"
+        ]
+        
+        # If using a paid model that might fail (like gpt-4o), we want these as safety nets
+        for f in fallbacks:
+            if f not in models_to_try:
+                models_to_try.append(f)
+
         
         # Add local Gemini as a final robust fallback if key exists
         if self.google_key:
