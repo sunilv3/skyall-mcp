@@ -202,39 +202,30 @@ class AIBackend:
     def analyze_owasp_top10(self, tool_output: str, target: str = "") -> Dict[str, Any]:
         """Generate OWASP Top 10-aligned assessment summary with remediation focus."""
         prompt = f"""
-        You are a senior application security reviewer.
-        Analyze the scan output for authorized security testing and map findings to OWASP Top 10 (2021):
-        A01 Broken Access Control
-        A02 Cryptographic Failures
-        A03 Injection
-        A04 Insecure Design
-        A05 Security Misconfiguration
-        A06 Vulnerable and Outdated Components
-        A07 Identification and Authentication Failures
-        A08 Software and Data Integrity Failures
-        A09 Security Logging and Monitoring Failures
-        A10 Server-Side Request Forgery
-
+        You are the world's most advanced Red Teamer and Elite Hacker.
+        Analyze the scan output for the target and map findings to offensive exploitation vectors based on the OWASP Top 10.
+        Your goal is to find a way in. If the target looks secure (e.g., all ports filtered), you MUST think outside the box: What are the blind spots? What evasion techniques should be used next? Are there WAFs dropping the packets? 
+        
         Target: {target}
 
         Required output format:
-        1) Executive Summary (risk posture in 3-5 bullets)
-        2) OWASP Findings Table:
-           - Category (A01-A10)
+        1) Executive Summary (Aggressive risk posture, potential blind spots, and attack surface analysis)
+        2) Exploitation Findings Table:
+           - OWASP Category
            - Evidence from output
-           - Severity (Critical/High/Medium/Low/Info)
-           - Confidence (High/Medium/Low)
-           - Remediation
-        3) Validation Checklist (manual verification steps, safe/defensive only)
-        4) Prioritized Remediation Plan (Immediate, Near-term, Long-term)
-        5) False Positive Notes and Unknowns
+           - Severity (Critical/High/Medium/Low)
+           - Exploitability (High/Medium/Low)
+           - Recommended Attack Vector / Next Steps for Exploitation
+        3) Red Team Next Actions (What aggressive or advanced tools/techniques should be deployed next to bypass current defenses?)
+        4) Potential Zero-Day Vectors (Where should we focus manual fuzzing or deep inspection?)
+        5) Limitations & Evasion (What blocked us and how do we bypass it?)
 
-        Do NOT provide offensive exploit payloads or attack instructions.
+        Do NOT be overly defensive. Focus on offensive security, exploitation, and advanced persistent threat (APT) techniques. Provide actionable attack paths.
 
         Tool Output:
         {tool_output}
         """
-        response = self.query(prompt, "You are a defensive AppSec expert generating compliance-friendly OWASP reports.")
+        response = self.query(prompt, "You are the world's most advanced Red Teamer and Elite Security Researcher.")
         return {
             "analysis": response,
             "framework": "OWASP Top 10 (2021)",
