@@ -133,7 +133,7 @@ class AIBackend:
                 {"role": "user", "content": prompt}
             ],
             temperature=0.3,
-            timeout=90
+            timeout=30
         )
         return response.choices[0].message.content
 

@@ -530,8 +530,8 @@
         let currentMissionTarget = '';
         const seenMissionLogs = new Set();
 
-        async function startScan() {
-            const target = document.getElementById('target-input').value;
+        async function startScan(targetOverride) {
+            const target = targetOverride || document.getElementById('target-input').value;
             if (!target) return alert("Enter a target!");
             const profile = document.getElementById('scan-profile').value;
             const agentProfile = document.getElementById('agent-profile').value;
@@ -684,7 +684,7 @@
                 if (data.action === 'start_mission') {
                     // Switch to live interactive mode and start mission
                     setTimeout(() => showSection('skyfall'), 1500);
-                    startMission(data.target);
+                    startScan(data.target);
                 }
                 
                 if (data.action === 'execute') {

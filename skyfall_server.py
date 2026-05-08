@@ -90,9 +90,9 @@ def get_tool_command(tool_name: str, target_url: str, target_host: str, scan_pro
     balanced_nuclei = "-severity critical,high,medium"
     nuclei_severity = deep_nuclei if scan_profile == "deep" else balanced_nuclei
 
-    nmap_cmd = os.environ.get("NMAP_PATH", "nmap")
+    # Define tool command map
     command_map = {
-        "nmap": f"{nmap_cmd} -sV -T4 -Pn {target_host}",
+        "nmap": f"nmap -sV -T4 -Pn {target_host}",
         "rustscan": f"rustscan -a {target_host} --ulimit 5000 -- -sV",
         "masscan": f"masscan {target_host} -p1-1000 --rate 2000",
         "amass": f"amass enum -passive -d {target_host}",
@@ -118,6 +118,14 @@ def get_tool_command(tool_name: str, target_url: str, target_host: str, scan_pro
     }
     
     cmd = command_map.get(tool_name, f"{tool_name} {target_url}")
+    
+    # Override with custom path if provided in env (e.g. NMAP_PATH, GOBUSTER_PATH)
+    binary_name = tool_name.split()[0]
+    env_path_key = f"{binary_name.upper()}_PATH"
+    custom_path = os.environ.get(env_path_key)
+    if custom_path:
+        cmd = cmd.replace(binary_name, custom_path, 1)
+
     
     # Add proxy arguments
     proxy_args = proxy_manager.get_proxy_args(tool_name)
@@ -201,10 +209,25 @@ def ensure_wordlist() -> str:
 def ensure_tool_available(tool_name: str, allow_install: bool = False) -> Dict[str, Any]:
     """Check tool availability, optionally install if allowed."""
     binary_name = tool_name.split()[0]
+    
+    # Check if a custom path is provided in environment variables
+    env_path_key = f"{binary_name.upper()}_PATH"
+    custom_path = os.environ.get(env_path_key)
+    if custom_path and os.path.exists(custom_path):
+        return {"tool": tool_name, "available": True, "installed": False, "method": "custom_path", "path": custom_path}
+
     if shutil.which(binary_name):
         return {"tool": tool_name, "available": True, "installed": False, "method": "existing"}
+    
+    # Fallback for common Linux paths if not in PATH (important for some container setups)
+    common_paths = ["/usr/bin", "/usr/local/bin", "/bin", "/sbin", "/usr/sbin"]
+    for p in common_paths:
+        full_p = os.path.join(p, binary_name)
+        if os.path.exists(full_p):
+            return {"tool": tool_name, "available": True, "installed": False, "method": "common_path", "path": full_p}
 
     if not allow_install or not AUTO_INSTALL_ENABLED:
+
         return {"tool": tool_name, "available": False, "installed": False, "reason": "missing"}
 
     install_errors = []
