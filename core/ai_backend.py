@@ -205,14 +205,52 @@ class AIBackend:
         }
 
     def _query_google(self, prompt: str, system_prompt: str) -> str:
-        """Query Gemini via Google AI API (simplified)"""
+        """Query Gemini via Google AI API (robust version)"""
         import requests
         try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key={self.google_key}"
-            data = {"contents": [{"parts": [{"text": f"{system_prompt}\n\n{prompt}"}]}]}
+            # Use gemini-1.5-flash for faster response and better availability on free tier
+            # but keep it configurable or fall back to pro if needed. 
+            # The original code used gemini-1.5-pro.
+            model_id = "gemini-1.5-flash"
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={self.google_key}"
+            
+            data = {
+                "contents": [{"parts": [{"text": f"{system_prompt}\n\n{prompt}"}]}],
+                "safetySettings": [
+                    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+                ],
+                "generationConfig": {
+                    "temperature": 0.3,
+                    "topP": 0.8,
+                    "topK": 40,
+                    "maxOutputTokens": 2048,
+                }
+            }
+            
             response = requests.post(url, json=data, timeout=60)
-            return response.json()["candidates"][0]["content"]["parts"][0]["text"]
+            res_json = response.json()
+            
+            if "candidates" in res_json and len(res_json["candidates"]) > 0:
+                candidate = res_json["candidates"][0]
+                if "content" in candidate and "parts" in candidate["content"]:
+                    return candidate["content"]["parts"][0]["text"]
+                elif "finishReason" in candidate:
+                    return f"Gemini failed: Generation finished with reason {candidate['finishReason']}"
+            
+            if "promptFeedback" in res_json and "blockReason" in res_json["promptFeedback"]:
+                return f"Gemini blocked the request due to safety filters: {res_json['promptFeedback']['blockReason']}. (Consider using a different model or rephrasing for authorized testing)."
+            
+            if "error" in res_json:
+                return f"Gemini API Error: {res_json['error'].get('message', 'Unknown error')}"
+                
+            return f"Gemini failed: No candidates returned. Response: {json.dumps(res_json)[:200]}"
+            
         except Exception as e:
+            logger.error(f"Gemini Query Exception: {str(e)}")
             return f"Gemini failed: {str(e)}"
+
 
 
