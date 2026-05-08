@@ -102,6 +102,11 @@ class AIBackend:
         # Add local Gemini as a robust fallback higher in the chain
         if self.google_key:
             models_to_try.insert(3, "google/gemini-direct")
+            
+        # Add local OSS model (Ollama) as the ultimate last resort
+        if self.oss_client:
+            models_to_try.append(self.oss_model)
+
 
         last_error = None
         for model in models_to_try:
@@ -120,13 +125,15 @@ class AIBackend:
                     "nvidia/nemotron-70b-instruct"
                 ]
                 
-                if self.nvidia_client and model in nvidia_nim_models:
+                if self.oss_client and model == self.oss_model:
+                    return self._query_client(self.oss_client, model, prompt, system_prompt)
+                elif self.nvidia_client and model in nvidia_nim_models:
                     return self._query_client(self.nvidia_client, model, prompt, system_prompt)
-
                 elif self.openrouter_client:
                     return self._query_client(self.openrouter_client, model, prompt, system_prompt)
                 elif self.google_key and "google" in model.lower():
                     return self._query_google(prompt, system_prompt)
+
 
             except Exception as e:
                 logger.warning(f"Model {model} failed: {e}")
@@ -136,17 +143,30 @@ class AIBackend:
         return f"All models failed. Last error: {str(last_error)}"
 
     def _query_client(self, client: OpenAI, model: str, prompt: str, system_prompt: str) -> str:
-        """Universal query for OpenAI-compatible clients"""
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.3,
-            timeout=30
-        )
-        return response.choices[0].message.content
+        """Universal query for OpenAI-compatible clients with retry logic"""
+        import time
+        max_retries = 2
+        for attempt in range(max_retries + 1):
+            try:
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.3,
+                    timeout=30
+                )
+                return response.choices[0].message.content
+            except Exception as e:
+                # If it's a rate limit error, wait and retry
+                if "429" in str(e) and attempt < max_retries:
+                    wait_time = (attempt + 1) * 3
+                    logger.warning(f"Rate limited on {model}. Retrying in {wait_time}s... (Attempt {attempt + 1}/{max_retries})")
+                    time.sleep(wait_time)
+                    continue
+                raise e
+
 
     def analyze_vulnerability(self, tool_output: str) -> Dict[str, Any]:
         """Use AI to analyze tool output for vulnerabilities and Zero-Day patterns"""
