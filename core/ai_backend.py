@@ -91,10 +91,11 @@ class AIBackend:
             if f not in models_to_try:
                 models_to_try.append(f)
         
-        # Add NVIDIA specific free/available models if using NVIDIA client
+        # Prioritize NVIDIA models if client is available
         if self.nvidia_client:
-            models_to_try.insert(1, "nvidia/llama-3.1-nemotron-70b-instruct") # Retry with original or similar
-            models_to_try.insert(2, "nvidia/nemotron-70b-instruct")
+            models_to_try.insert(0, "mistralai/mistral-nemotron")
+            models_to_try.insert(1, "meta/llama-3.1-70b-instruct")
+            models_to_try.insert(2, "nvidia/llama-3.1-nemotron-70b-instruct") # Last resort old ID
 
 
         
@@ -111,12 +112,13 @@ class AIBackend:
                 if model == "google/gemini-direct" and self.google_key:
                     return self._query_google(prompt, system_prompt)
                 
-                if self.nvidia_client and "nvidia" in model.lower():
+                if self.nvidia_client and any(x in model.lower() for x in ["nvidia", "mistral", "meta"]):
                     return self._query_client(self.nvidia_client, model, prompt, system_prompt)
                 elif self.openrouter_client:
                     return self._query_client(self.openrouter_client, model, prompt, system_prompt)
                 elif self.google_key and "google" in model.lower():
                     return self._query_google(prompt, system_prompt)
+
             except Exception as e:
                 logger.warning(f"Model {model} failed: {e}")
                 last_error = e
