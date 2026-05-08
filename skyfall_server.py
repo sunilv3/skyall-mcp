@@ -90,8 +90,9 @@ def get_tool_command(tool_name: str, target_url: str, target_host: str, scan_pro
     balanced_nuclei = "-severity critical,high,medium"
     nuclei_severity = deep_nuclei if scan_profile == "deep" else balanced_nuclei
 
+    nmap_cmd = os.environ.get("NMAP_PATH", "nmap")
     command_map = {
-        "nmap": f"nmap -sV -T4 -Pn {target_host}",
+        "nmap": f"{nmap_cmd} -sV -T4 -Pn {target_host}",
         "rustscan": f"rustscan -a {target_host} --ulimit 5000 -- -sV",
         "masscan": f"masscan {target_host} -p1-1000 --rate 2000",
         "amass": f"amass enum -passive -d {target_host}",
@@ -140,6 +141,18 @@ def get_tool_timeout(tool_name: str, scan_profile: str = "balanced") -> int:
     return timeout
 
 
+WINGET_ID_MAP = {
+    "nmap": "Insecure.Nmap",
+    "sqlmap": "sqlmapproject.sqlmap",
+    "gobuster": "OJ.Gobuster",
+    "httpx": "projectdiscovery.httpx",
+    "nuclei": "projectdiscovery.nuclei",
+    "subfinder": "projectdiscovery.subfinder",
+    "amass": "OWASP.Amass",
+    "ffuf": "ffuf.ffuf",
+    "nikto": "sullo.nikto",
+}
+
 APT_TOOL_MAP = {
     "nmap": "nmap", "amass": "amass", "subfinder": "subfinder", "gobuster": "gobuster", "httpx": "httpx-toolkit",
     "nuclei": "nuclei", "nikto": "nikto", "whatweb": "whatweb", "ffuf": "ffuf", "testssl": "testssl.sh",
@@ -159,7 +172,7 @@ GITHUB_INSTALL_MAP = {
 }
 
 WORDLIST_DIR = Path("data/wordlists")
-DEFAULT_WORDLIST_PATH = "/usr/share/wordlists/dirb/common.txt"
+DEFAULT_WORDLIST_PATH = "/usr/share/wordlists/dirb/common.txt" if os.name != 'nt' else str(Path("data/wordlists/common.txt"))
 GITHUB_WORDLIST_URL = "https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt"
 
 
@@ -184,6 +197,7 @@ def ensure_wordlist() -> str:
         return DEFAULT_WORDLIST_PATH
 
 
+
 def ensure_tool_available(tool_name: str, allow_install: bool = False) -> Dict[str, Any]:
     """Check tool availability, optionally install if allowed."""
     binary_name = tool_name.split()[0]
@@ -194,8 +208,21 @@ def ensure_tool_available(tool_name: str, allow_install: bool = False) -> Dict[s
         return {"tool": tool_name, "available": False, "installed": False, "reason": "missing"}
 
     install_errors = []
+    
+    # Try Windows Installation (winget)
+    if os.name == 'nt':
+        winget_id = WINGET_ID_MAP.get(tool_name)
+        if winget_id:
+            logger.info(f"Attempting to install {tool_name} via winget...")
+            winget_cmd = f"winget install -e --id {winget_id} --accept-package-agreements --accept-source-agreements"
+            result = CommandExecutor(winget_cmd, timeout=600).execute()
+            if result.get("success") or shutil.which(binary_name):
+                return {"tool": tool_name, "available": True, "installed": True, "method": "winget"}
+            install_errors.append(result.get("stderr", "winget install failed"))
+
+    # Try Linux Installation (apt)
     apt_pkg = APT_TOOL_MAP.get(tool_name)
-    if apt_pkg:
+    if apt_pkg and os.name != 'nt':
         apt_cmd = f"apt-get update && apt-get install -y {apt_pkg}"
         if os.geteuid() != 0:
             apt_cmd = f"sudo {apt_cmd}"
@@ -204,17 +231,21 @@ def ensure_tool_available(tool_name: str, allow_install: bool = False) -> Dict[s
             return {"tool": tool_name, "available": True, "installed": True, "method": "apt"}
         install_errors.append(result.get("stderr", "apt install failed"))
 
+    # Try Go Installation
     gh_pkg = GITHUB_INSTALL_MAP.get(tool_name)
     if gh_pkg:
         go_cmd = f"go install {gh_pkg}"
         result = CommandExecutor(go_cmd, timeout=600).execute()
         if result.get("success"):
             go_bin = os.path.expanduser(f"~/go/bin/{binary_name}")
-            if os.path.exists(go_bin):
-                return {"tool": tool_name, "available": True, "installed": True, "method": "github-go-install", "path": go_bin}
+            if os.name == 'nt':
+                go_bin = os.path.expanduser(f"~/go/bin/{binary_name}.exe")
+            if os.path.exists(go_bin) or shutil.which(binary_name):
+                return {"tool": tool_name, "available": True, "installed": True, "method": "github-go-install"}
         install_errors.append(result.get("stderr", "github install failed"))
 
     return {"tool": tool_name, "available": False, "installed": False, "reason": "install_failed", "errors": install_errors[:2]}
+
 
 # Initialize Flask app
 app = Flask(__name__)

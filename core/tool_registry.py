@@ -369,7 +369,21 @@ class ToolRegistry:
             ]
         ))
 
+        self.register_tool(Tool(
+            name="aig-scanner",
+            category="misc",
+            description="Tencent AI-Infra-Guard (A.I.G) scanner for AI agents and infrastructure",
+            command="python tools/ai-infra-guard/agent-scan/main.py",
+            parameters=[
+                ToolParameter("repo", "string", required=True, description="Target repository path or URL"),
+                ToolParameter("model", "string", description="LLM model to use", default="google/gemma-4-26b-a4b-it:free"),
+                ToolParameter("language", "string", description="Output language (en/zh)", default="en")
+            ],
+            examples=["aig-scanner --repo .", "aig-scanner --repo /path/to/project --language en"]
+        ))
+        
         # Additional Network Tools
+
         network_tools = [
             ("fierce", "DNS reconnaissance and zone transfer testing"),
             ("dnsenum", "DNS information gathering and subdomain brute forcing"),

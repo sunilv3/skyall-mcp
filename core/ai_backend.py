@@ -76,20 +76,26 @@ class AIBackend:
 
         models_to_try = [self.default_model]
         
-        # Define high-quality free/low-cost fallbacks
+        # Define high-quality verified free/low-cost fallbacks
         fallbacks = [
-            "google/gemini-2.0-flash-lite-preview-02-05:free",
-            "meta-llama/llama-3.3-70b-instruct:free",
-            "deepseek/deepseek-chat:free",
-            "google/gemini-flash-1.5:free",
-            "mistralai/mistral-7b-instruct:free",
-            "nvidia/llama-3.1-nemotron-70b-instruct"
+            "google/gemma-4-26b-a4b-it:free",
+            "qwen/qwen3-coder:free",
+            "baidu/cobuddy:free",
+            "meta-llama/llama-3.1-8b-instruct:free",
+            "nousresearch/hermes-3-llama-3.1-405b:free"
         ]
+
         
         # If using a paid model that might fail (like gpt-4o), we want these as safety nets
         for f in fallbacks:
             if f not in models_to_try:
                 models_to_try.append(f)
+        
+        # Add NVIDIA specific free/available models if using NVIDIA client
+        if self.nvidia_client:
+            models_to_try.insert(1, "nvidia/llama-3.1-nemotron-70b-instruct") # Retry with original or similar
+            models_to_try.insert(2, "nvidia/nemotron-70b-instruct")
+
 
         
         # Add local Gemini as a final robust fallback if key exists
